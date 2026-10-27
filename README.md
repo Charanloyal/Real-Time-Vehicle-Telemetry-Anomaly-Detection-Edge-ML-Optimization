@@ -73,7 +73,7 @@ flowchart LR
 | Evaluation: precision, recall, F1, ROC-AUC, PR-AUC, confusion matrix | Implemented | Plus recall per anomaly type and Matplotlib figures |
 | Optimized inference path and benchmark | Implemented | Measured numbers below; bit-identical scores to the reference path |
 | Streaming: pandas micro-batch engine (default on Windows) | Implemented and verified | File checkpoint, idempotent per-batch sinks, recovery tested |
-| Streaming: PySpark Structured Streaming engine | Implemented, **partially verified** | Spark validation and `foreachBatch` logic verified on this machine against the pandas engine (in-memory DataFrame). The Spark file source and checkpoint path needs Linux, Docker, WSL or Windows `winutils` and **has not been executed** here (see [Spark on Windows](#spark-on-windows)) |
+| Streaming: PySpark Structured Streaming engine | Implemented and verified on Linux (CI) | The full file-source + checkpoint path runs in GitHub Actions (Ubuntu, Java 17, PySpark 4.1) and matches the pandas engine. On the Windows development machine only the validation and `foreachBatch` logic could run (see [Spark on Windows](#spark-on-windows)) |
 | FastAPI service (`/health`, `/model-info`, `/predict`, `/predict-batch`, `/docs`) | Implemented and verified | Model loaded once at startup; `PORT` env var; `/health` returns 503 without a model |
 | Browser demo at `/` (single-event scoring, live stream simulation, reports) | Implemented and verified locally | Plain HTML/JS served by FastAPI; no external scripts |
 | Structured JSON logging and reports | Implemented | `reports/*.md`, `reports/*.json`, `reports/figures/*.png` |
@@ -247,7 +247,10 @@ The Spark **file source and checkpoint** go through Hadoop's local filesystem. O
 `UnsatisfiedLinkError: NativeIO$Windows.access0` unless `HADOOP_HOME` points to `winutils.exe` and
 `hadoop.dll`. Apache does not distribute these binaries; community builds exist but are third-party. They were
 deliberately **not** installed on the development machine, so `test_spark_engine_matches_local_engine` is
-skipped there. To run the full Spark engine, use one of these:
+skipped there. That test runs in GitHub Actions on Ubuntu, which fails the build if any test is skipped. There
+it streams the generated files through Spark, checks totals, invalid reasons, scores and anomaly counts against
+the pandas engine, and confirms that a restart from the checkpoint does not re-process files. To run the full
+Spark engine yourself, use one of these:
 
 - Linux, macOS or WSL: `pip install -r requirements-spark.txt`, install Java 17, then
   `python scripts/run_streaming.py --engine spark --reset`.
@@ -383,10 +386,14 @@ python -m pytest -m spark   # only the Spark tests (skipped automatically withou
 reason explained above. Without Java, the in-memory Spark test is skipped as well.
 
 **GitHub Actions** ([ci.yml](.github/workflows/ci.yml)) runs on every push and pull request:
-1. **Tests** on Ubuntu with Python 3.11, Temurin Java 17 and PySpark. This includes the Spark file-source
-   streaming test that cannot run on the Windows development machine.
+1. **Tests** on Ubuntu 24.04 with Python 3.11, Temurin Java 17 and PySpark. The job fails if any test is
+   skipped, so the Spark file-source streaming test always runs there.
 2. **Docker:** builds the image, runs it like Render (`PORT=10000`, 512 MB memory limit, half a CPU, 1
    inference thread) and runs `scripts/deploy_smoke_test.py` against it.
+
+First CI results (commit `44d4571`): **78 passed, 0 skipped** on Linux. The Docker image is 740 MB. The
+container used **151 MiB of 512 MiB** after the smoke test, passed all 11 checks, and its predictions matched
+the generator's ground truth for 40/40 events.
 
 ## Docker
 
@@ -406,7 +413,8 @@ docker compose --profile spark run --rm spark-streaming
 The container runs as a non-root user, binds `0.0.0.0:$PORT` and has a `/health` HEALTHCHECK.
 
 > Docker is not installed on the development machine. The API image is built and smoke-tested by the
-> GitHub Actions `docker` job. `Dockerfile.spark` is not built in CI.
+> GitHub Actions `docker` job. `Dockerfile.spark` is not built in CI (the Spark engine itself is tested in the
+> `tests` job).
 
 ## Deploying to Render
 
@@ -459,8 +467,8 @@ See [.env.example](.env.example). No secrets are required.
 - De-duplication covers each micro-batch, not across batches.
 - Spark scoring runs on the driver inside `foreachBatch`. That suits a single node; a cluster deployment
   should use `mapInPandas` on executors.
-- The Spark file-source path has not run on the Windows development machine; it is exercised only by the
-  Linux CI job. `Dockerfile.spark` is not built in CI.
+- The Spark file-source path cannot run on the Windows development machine without `winutils`; it is verified
+  by the Linux CI job. `Dockerfile.spark` is not built in CI.
 - Benchmarks come from one laptop and include normal OS noise. The free Render instance is slower.
 - The public demo has no authentication or rate limiting beyond request validation and batch-size limits.
 
