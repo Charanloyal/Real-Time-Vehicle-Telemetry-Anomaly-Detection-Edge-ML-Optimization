@@ -1,0 +1,72 @@
+{
+  "generated_at": "2026-10-27T11:45:58+00:00",
+  "run": {
+    "engine": "local",
+    "requested_engine": "auto",
+    "wall_clock_seconds": 1.55,
+    "batches_this_run": 10,
+    "model": "random_forest",
+    "note": ""
+  },
+  "batches": 10,
+  "engines": [
+    "local"
+  ],
+  "input_rows": 100500,
+  "valid_rows": 99500,
+  "invalid_rows": 1000,
+  "duplicates_dropped": 500,
+  "scored_rows": 99000,
+  "anomalies_detected": 5006,
+  "invalid_by_category": {
+    "missing_field": 335,
+    "malformed_json": 183,
+    "invalid_timestamp": 171,
+    "out_of_range": 157,
+    "non_numeric": 154
+  },
+  "invalid_by_reason": {
+    "malformed_json": 183,
+    "invalid_timestamp": 171,
+    "missing_field:speed": 44,
+    "missing_field:battery_voltage": 38,
+    "missing_field:brake_pressure": 37,
+    "missing_field:engine_temperature": 35,
+    "missing_field:longitude": 31,
+    "missing_field:latitude": 30,
+    "missing_field:engine_rpm": 30,
+    "missing_field:acceleration": 29,
+    "out_of_range:acceleration": 24,
+    "missing_field:fuel_level": 24,
+    "non_numeric:engine_temperature": 23,
+    "non_numeric:speed": 21,
+    "out_of_range:speed": 21,
+    "out_of_range:latitude": 21,
+    "out_of_range:longitude": 18,
+    "non_numeric:brake_pressure": 18,
+    "non_numeric:engine_rpm": 17,
+    "missing_field:event_timestamp": 17,
+    "non_numeric:longitude": 17,
+    "out_of_range:battery_voltage": 16,
+    "non_numeric:battery_voltage": 16,
+    "non_numeric:latitude": 15,
+    "out_of_range:engine_temperature": 15,
+    "out_of_range:brake_pressure": 15,
+    "non_numeric:acceleration": 14,
+    "out_of_range:engine_rpm": 14,
+    "out_of_range:fuel_level": 13,
+    "non_numeric:fuel_level": 13,
+    "missing_field:vehicle_id": 10,
+    "missing_field:event_id": 10
+  },
+  "batch_processing_seconds_total": 1.466,
+  "rows_per_second_in_batch_processing": 68572.6,
+  "ground_truth_comparison": {
+    "matched_events": 99000,
+    "precision": 0.974230922892529,
+    "recall": 0.9703541583764425,
+    "true_positives": 4877,
+    "false_positives": 129,
+    "false_negatives": 149
+  }
+}

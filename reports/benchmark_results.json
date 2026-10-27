@@ -1,0 +1,204 @@
+{
+  "measured_at": "2026-10-27T11:51:29+00:00",
+  "environment": {
+    "os": "Windows-11-10.0.26200-SP0",
+    "machine": "AMD64",
+    "cpu": "Intel(R) Core(TM) Ultra 5 235",
+    "logical_cpus": 14,
+    "total_memory_gb": 63.7,
+    "python_implementation": "CPython",
+    "libraries": {
+      "python": "3.14.7",
+      "numpy": "2.5.4",
+      "pandas": "2.3.3",
+      "scikit-learn": "1.7.2",
+      "xgboost": "3.4.1"
+    },
+    "in_container": false
+  },
+  "settings": {
+    "single_iterations": 2000,
+    "warmup_iterations": 100,
+    "batch_size": 1000,
+    "batch_iterations": 20,
+    "event_pool": 30000
+  },
+  "models": [
+    {
+      "model_name": "random_forest",
+      "model_type": "RandomForestClassifier",
+      "parity": {
+        "events_checked": 500,
+        "max_abs_score_diff_single": 4.440892098500626e-16,
+        "max_abs_score_diff_batch": 4.440892098500626e-16,
+        "prediction_agreement": 1.0
+      },
+      "single_event": {
+        "baseline": {
+          "calls": 2000,
+          "items_per_call": 1,
+          "mean_ms": 35.41464225000001,
+          "p50_ms": 36.497749999999996,
+          "p95_ms": 43.152925,
+          "p99_ms": 46.464983,
+          "min_ms": 19.4517,
+          "max_ms": 55.4552,
+          "throughput_per_s": 28.236908139316295
+        },
+        "numpy_features": {
+          "calls": 2000,
+          "items_per_call": 1,
+          "mean_ms": 30.963273649999998,
+          "p50_ms": 32.01575,
+          "p95_ms": 37.32061,
+          "p99_ms": 40.431604,
+          "min_ms": 16.1387,
+          "max_ms": 53.8073,
+          "throughput_per_s": 32.296326651494105
+        },
+        "optimized": {
+          "calls": 2000,
+          "items_per_call": 1,
+          "mean_ms": 4.354545600000001,
+          "p50_ms": 3.9576000000000002,
+          "p95_ms": 7.794804999999999,
+          "p99_ms": 9.648579,
+          "min_ms": 1.846,
+          "max_ms": 12.6245,
+          "throughput_per_s": 229.64508627490315
+        }
+      },
+      "batch": {
+        "baseline_per_event_loop": {
+          "calls": 3,
+          "items_per_call": 1000,
+          "mean_ms": 34113.68456666666,
+          "p50_ms": 34067.759,
+          "p95_ms": 34384.37405,
+          "p99_ms": 34412.51761,
+          "min_ms": 33853.7412,
+          "max_ms": 34419.5535,
+          "throughput_per_s": 29.313749385404268
+        },
+        "baseline_vectorized": {
+          "calls": 20,
+          "items_per_call": 1000,
+          "mean_ms": 36.184524999999994,
+          "p50_ms": 36.0089,
+          "p95_ms": 38.60682500000001,
+          "p99_ms": 45.33776499999999,
+          "min_ms": 31.9763,
+          "max_ms": 47.0205,
+          "throughput_per_s": 27636.123453327084
+        },
+        "optimized_batch": {
+          "calls": 20,
+          "items_per_call": 1000,
+          "mean_ms": 33.30105999999999,
+          "p50_ms": 32.3224,
+          "p95_ms": 37.61027,
+          "p99_ms": 42.26709399999999,
+          "min_ms": 29.0962,
+          "max_ms": 43.4313,
+          "throughput_per_s": 30029.07414959164
+        }
+      },
+      "improvement": {
+        "single_mean_latency_pct": 87.7041095904336,
+        "single_p50_latency_pct": 89.15659184470276,
+        "feature_extraction_only_mean_latency_pct": 12.569288625243724,
+        "batch_speedup_vs_per_event_loop": 1024.4023633682132,
+        "batch_speedup_vs_baseline_vectorized": 1.0865877842927523
+      },
+      "batch_size": 1000
+    },
+    {
+      "model_name": "xgboost",
+      "model_type": "XGBClassifier",
+      "parity": {
+        "events_checked": 500,
+        "max_abs_score_diff_single": 0.0,
+        "max_abs_score_diff_batch": 0.0,
+        "prediction_agreement": 1.0
+      },
+      "single_event": {
+        "baseline": {
+          "calls": 2000,
+          "items_per_call": 1,
+          "mean_ms": 2.8750559,
+          "p50_ms": 2.7972,
+          "p95_ms": 3.66607,
+          "p99_ms": 4.157828,
+          "min_ms": 1.9903,
+          "max_ms": 6.6712,
+          "throughput_per_s": 347.8193241390541
+        },
+        "numpy_features": {
+          "calls": 2000,
+          "items_per_call": 1,
+          "mean_ms": 0.3522158,
+          "p50_ms": 0.3114,
+          "p95_ms": 0.5272999999999999,
+          "p99_ms": 0.8623109999999999,
+          "min_ms": 0.2615,
+          "max_ms": 2.265,
+          "throughput_per_s": 2839.1684870468616
+        },
+        "optimized": {
+          "calls": 2000,
+          "items_per_call": 1,
+          "mean_ms": 0.21796285,
+          "p50_ms": 0.1813,
+          "p95_ms": 0.371125,
+          "p99_ms": 0.566753,
+          "min_ms": 0.1446,
+          "max_ms": 1.1085,
+          "throughput_per_s": 4587.937806832678
+        }
+      },
+      "batch": {
+        "baseline_per_event_loop": {
+          "calls": 3,
+          "items_per_call": 1000,
+          "mean_ms": 2879.5272,
+          "p50_ms": 2885.2188,
+          "p95_ms": 2915.11455,
+          "p99_ms": 2917.77195,
+          "min_ms": 2834.9265,
+          "max_ms": 2918.4363,
+          "throughput_per_s": 347.27923389645355
+        },
+        "baseline_vectorized": {
+          "calls": 20,
+          "items_per_call": 1000,
+          "mean_ms": 3.518285,
+          "p50_ms": 3.29755,
+          "p95_ms": 4.874160000000001,
+          "p99_ms": 5.0772319999999995,
+          "min_ms": 2.6436,
+          "max_ms": 5.128,
+          "throughput_per_s": 284229.3901716319
+        },
+        "optimized_batch": {
+          "calls": 20,
+          "items_per_call": 1000,
+          "mean_ms": 1.3696400000000002,
+          "p50_ms": 1.2758500000000002,
+          "p95_ms": 2.0386900000000003,
+          "p99_ms": 2.091738,
+          "min_ms": 1.1089,
+          "max_ms": 2.105,
+          "throughput_per_s": 730118.8633509534
+        }
+      },
+      "improvement": {
+        "single_mean_latency_pct": 92.41883088255778,
+        "single_p50_latency_pct": 93.51851851851852,
+        "feature_extraction_only_mean_latency_pct": 87.74925384929037,
+        "batch_speedup_vs_per_event_loop": 2102.3971262521536,
+        "batch_speedup_vs_baseline_vectorized": 2.5687662451447095
+      },
+      "batch_size": 1000
+    }
+  ]
+}

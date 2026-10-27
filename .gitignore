@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+
+# Generated data (reproducible with scripts/generate_data.py)
+data/raw/*
+!data/raw/.gitkeep
+data/processed/
+data/streaming_input/*
+!data/streaming_input/.gitkeep
+data/streaming_output/
+data/checkpoints/
+
+# Model binaries (reproducible with scripts/train_model.py)
+artifacts/models/*
+!artifacts/models/.gitkeep
+
+# Spark / Hadoop local files
+spark-warehouse/
+metastore_db/
+derby.log
+*.crc
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

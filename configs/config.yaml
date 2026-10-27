@@ -1,0 +1,82 @@
+# Vehicle telemetry anomaly detection - central configuration.
+# Relative paths are resolved against the project root (the parent of the configs/ folder).
+# Environment overrides: VTAD_CONFIG (config file path), VTAD_MODEL_DIR, LOG_LEVEL, PORT.
+
+random_seed: 42
+
+paths:
+  raw_data: data/raw/telemetry.parquet
+  processed_dir: data/processed
+  streaming_input: data/streaming_input
+  streaming_ground_truth: data/raw/streaming_ground_truth.parquet
+  streaming_output: data/streaming_output
+  checkpoint_dir: data/checkpoints
+  model_dir: artifacts/models
+  reports_dir: reports
+
+# Synthetic training dataset (labelled).
+data_generation:
+  num_vehicles: 100
+  events_per_vehicle: 2000
+  anomaly_rate: 0.05
+  hard_braking_rate: 0.004        # legitimate (non-anomalous) emergency braking events
+  event_interval_seconds: 1.0
+  start_time: "2026-01-01T00:00:00+00:00"
+  base_latitude: 40.0
+  base_longitude: -95.0
+
+# Synthetic streaming input: JSON Lines files with injected malformed and duplicate events.
+streaming_data:
+  num_vehicles: 50
+  num_files: 20
+  events_per_file: 5000
+  anomaly_rate: 0.05
+  malformed_rate: 0.01
+  duplicate_rate: 0.005
+  seed_offset: 1000
+
+training:
+  validation_size: 0.15
+  test_size: 0.15
+  models: [random_forest, xgboost]
+  selection_metric: average_precision   # chosen on the validation split, never on test
+  random_forest:
+    n_estimators: 150
+    max_depth: 14
+    min_samples_leaf: 3
+    class_weight: balanced_subsample
+    n_jobs: -1
+  xgboost:
+    n_estimators: 400
+    max_depth: 6
+    learning_rate: 0.08
+    subsample: 0.9
+    colsample_bytree: 0.9
+    tree_method: hist
+    n_jobs: -1
+    early_stopping_rounds: 30
+
+benchmark:
+  model: null                 # null = model selected during training
+  single_iterations: 2000
+  warmup_iterations: 100
+  batch_size: 1000
+  batch_iterations: 20
+
+streaming:
+  engine: auto                # auto | spark | local
+  trigger: available_now      # available_now | processing_time
+  processing_interval_seconds: 5
+  max_runtime_seconds: null   # only used with processing_time trigger
+  max_files_per_trigger: 2
+  output_format: parquet      # parquet | csv
+  spark_master: "local[*]"
+  shuffle_partitions: 4
+
+api:
+  max_batch_size: 1000
+  default_port: 8000
+
+logging:
+  level: INFO
+  json: true

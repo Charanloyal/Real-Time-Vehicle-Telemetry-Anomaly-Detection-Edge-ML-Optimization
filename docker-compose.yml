@@ -1,0 +1,23 @@
+services:
+  api:
+    build:
+      context: .
+      target: api
+    image: vehicle-telemetry-anomaly-api:latest
+    environment:
+      PORT: "8000"
+      LOG_LEVEL: INFO
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  # Optional: PySpark Structured Streaming demo on Linux with Java 17.
+  # Run with: docker compose --profile spark run --rm spark-streaming
+  spark-streaming:
+    build:
+      context: .
+      target: spark
+    image: vehicle-telemetry-anomaly-spark:latest
+    profiles: ["spark"]
+    environment:
+      LOG_LEVEL: INFO

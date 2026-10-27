@@ -1,0 +1,2 @@
+# Optional: PySpark Structured Streaming engine. Also requires a Java 17+ runtime (JAVA_HOME or java on PATH).
+pyspark>=3.5,<4.2

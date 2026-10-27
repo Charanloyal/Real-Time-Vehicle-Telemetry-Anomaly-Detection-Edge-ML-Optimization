@@ -1,0 +1,72 @@
+[
+  {
+    "event_id": "VEH-0015-0000108",
+    "vehicle_id": "VEH-0015",
+    "event_timestamp": "2026-01-01T00:10:32.000Z",
+    "speed": 38.35,
+    "engine_rpm": 2694.0,
+    "engine_temperature": 38.35,
+    "fuel_level": 45.17,
+    "battery_voltage": 14.232,
+    "brake_pressure": 7.46,
+    "acceleration": -0.332,
+    "latitude": 39.658206,
+    "longitude": -95.118392
+  },
+  {
+    "event_id": "VEH-0018-0000100",
+    "vehicle_id": "VEH-0018",
+    "event_timestamp": "2026-01-01T00:19:07.000Z",
+    "speed": 23.4,
+    "engine_rpm": 2031.0,
+    "engine_temperature": 50.02,
+    "fuel_level": 52.35,
+    "battery_voltage": 14.316,
+    "brake_pressure": 0.17,
+    "acceleration": -0.117,
+    "latitude": 39.883494,
+    "longitude": -94.589023
+  },
+  {
+    "event_id": "VEH-0015-0000111",
+    "vehicle_id": "VEH-0015",
+    "event_timestamp": "2026-01-01T00:10:35.000Z",
+    "speed": 37.76,
+    "engine_rpm": 2644.0,
+    "engine_temperature": 107.88,
+    "fuel_level": 45.17,
+    "battery_voltage": 14.271,
+    "brake_pressure": 1.01,
+    "acceleration": -0.268,
+    "latitude": 39.658107,
+    "longitude": -95.118044
+  },
+  {
+    "event_id": "VEH-0015-0000025",
+    "vehicle_id": "VEH-0015",
+    "event_timestamp": "2026-01-01T00:09:09.000Z",
+    "speed": 28.42,
+    "engine_rpm": 2308.0,
+    "engine_temperature": 23.64,
+    "fuel_level": 45.31,
+    "battery_voltage": 15.697,
+    "brake_pressure": 0.66,
+    "acceleration": -0.021,
+    "latitude": 39.659148,
+    "longitude": -95.12779
+  },
+  {
+    "event_id": "VEH-0015-0000002",
+    "vehicle_id": "VEH-0015",
+    "event_timestamp": "2026-01-01T00:08:46.000Z",
+    "speed": 37.67,
+    "engine_rpm": 2105.0,
+    "engine_temperature": 18.35,
+    "fuel_level": 45.34,
+    "battery_voltage": 14.093,
+    "brake_pressure": 0.39,
+    "acceleration": 6.0,
+    "latitude": 39.659184,
+    "longitude": -95.129532
+  }
+]
