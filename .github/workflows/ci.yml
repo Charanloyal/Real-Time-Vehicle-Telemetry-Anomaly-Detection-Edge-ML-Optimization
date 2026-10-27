@@ -35,7 +35,22 @@ jobs:
           pip install -r requirements-dev.txt -r requirements-spark.txt
           pip install --no-deps -e .
       - name: Run test suite (including Spark file-source streaming)
-        run: python -m pytest -rs
+        run: python -m pytest -rs --junitxml=pytest-results.xml
+      - name: Require that no test was skipped (Spark must run on Linux)
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          root = ET.parse("pytest-results.xml").getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          total, failures, errors, skipped = (int(suite.get(k)) for k in ("tests", "failures", "errors", "skipped"))
+          passed = total - failures - errors - skipped
+          print(f"::notice title=pytest::{passed} passed, {skipped} skipped, {failures + errors} failed (Python 3.11, Java 17, PySpark)")
+          if skipped:
+              print("::error title=pytest::Tests were skipped in CI; the Spark tests must run on Linux")
+              raise SystemExit(1)
+          PY
 
   docker:
     name: Docker image build + smoke test
@@ -52,10 +67,16 @@ jobs:
             --memory=512m --cpus=0.5 \
             vehicle-telemetry-anomaly-api:ci
       - name: Smoke test
-        run: python3 scripts/deploy_smoke_test.py --url http://localhost:10000 --wait 120
-      - name: Container memory usage
+        shell: bash
+        run: |
+          python3 scripts/deploy_smoke_test.py --url http://localhost:10000 --wait 120 | tee smoke.log
+          echo "::notice title=Docker smoke test::$(grep -c '^\[PASS\]' smoke.log) checks passed; $(grep 'predict-batch -' smoke.log | sed 's/^\[PASS\] //')"
+      - name: Report image size and container memory
         if: always()
-        run: docker stats --no-stream vtad || true
+        run: |
+          size_mb=$(( $(docker image inspect -f '{{.Size}}' vehicle-telemetry-anomaly-api:ci) / 1024 / 1024 ))
+          mem=$(docker stats --no-stream --format '{{.MemUsage}}' vtad || echo n/a)
+          echo "::notice title=Docker image::size ${size_mb} MB; container memory after smoke test ${mem}"
       - name: Container logs
         if: always()
         run: docker logs vtad 2>&1 | tail -n 60
