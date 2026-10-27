@@ -7,6 +7,10 @@ End-to-end portfolio project. It generates vehicle telemetry, trains scikit-lear
 validates and scores event streams with PySpark Structured Streaming (with a pandas fallback engine), serves
 predictions over FastAPI, and benchmarks an optimized inference path against a straightforward baseline.
 
+**Live demo:** <https://vehicle-telemetry-anomaly-detection.onrender.com/> (API docs at
+[/docs](https://vehicle-telemetry-anomaly-detection.onrender.com/docs)). It runs on Render's free plan, so the
+first request after a period of inactivity can take up to a minute while the instance wakes up.
+
 > **Data disclaimer:** every dataset in this repository is **synthetic**, produced by
 > [`data_generator.py`](src/vehicle_anomaly/data_generator.py). No real vehicle, fleet or production telemetry
 > is used, and none of the metrics below describe real-world performance.
@@ -78,7 +82,7 @@ flowchart LR
 | Browser demo at `/` (single-event scoring, live stream simulation, reports) | Implemented and verified locally | Plain HTML/JS served by FastAPI; no external scripts |
 | Structured JSON logging and reports | Implemented | `reports/*.md`, `reports/*.json`, `reports/figures/*.png` |
 | Dockerfile (API) and `Dockerfile.spark`, docker-compose | Written; built and smoke-tested by GitHub Actions | Docker is not installed on the development machine |
-| Render deployment (`render.yaml` Blueprint, free plan) | Configured | See [Deploying to Render](#deploying-to-render) |
+| Render deployment (`render.yaml` Blueprint, free plan) | Deployed and verified | <https://vehicle-telemetry-anomaly-detection.onrender.com/>; `scripts/deploy_smoke_test.py` passed 11/11 checks against it |
 | Kafka source | Not implemented | Planned (see future work) |
 
 ## Technology stack
@@ -437,7 +441,9 @@ Render's published JSON schema.
 
 **Free-plan behaviour:** the service sleeps after about 15 minutes without traffic. The first request after
 that takes up to a minute while it wakes up, and the demo page shows a "waking up" message during that time.
-Latency on the shared free CPU is higher than the laptop benchmark numbers.
+Latency on the shared free CPU is higher than the laptop benchmark numbers. In the smoke test against the live
+service, server-side time was about 10 ms for one event and 12 ms for a 40-event batch, with predictions
+matching the generator's ground truth for 40/40 events.
 
 ## Configuration
 
