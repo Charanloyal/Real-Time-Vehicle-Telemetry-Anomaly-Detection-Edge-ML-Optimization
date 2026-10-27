@@ -1,29 +1,42 @@
-"""FastAPI service for real-time anomaly scoring.
+"""FastAPI service for real-time anomaly scoring, plus a browser demo.
 
 Run locally:  python scripts/run_api.py        (binds 0.0.0.0:$PORT, default 8000)
+Demo UI:      http://localhost:8000/
 Docs:         http://localhost:8000/docs
 """
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime
+from importlib import resources
+from pathlib import Path
 from typing import Any, AsyncIterator, Awaitable, Callable
 
-from fastapi import FastAPI, HTTPException, Request, Response, status
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, HTTPException, Query, Request, Response, status
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from vehicle_anomaly import __version__
 from vehicle_anomaly.artifacts import ModelArtifactsError
 from vehicle_anomaly.config import AppConfig, load_config
+from vehicle_anomaly.data_generator import sample_demo_events
 from vehicle_anomaly.logging_utils import configure_logging, get_logger
 from vehicle_anomaly.predict import AnomalyPredictor
-from vehicle_anomaly.schema import VALID_RANGES
+from vehicle_anomaly.schema import ANOMALY_TYPE_COLUMN, LABEL_COLUMN, REQUIRED_FIELDS, VALID_RANGES
 
 logger = get_logger(__name__)
+DEMO_MAX_EVENTS = 200
+REPORT_FILES = {
+    "model_evaluation": "model_evaluation.json",
+    "benchmark": "benchmark_results.json",
+    "streaming": "streaming_summary.json",
+}
+_FIGURE_NAME = re.compile(r"^[a-z0-9_]+\.png$")
 
 
 def _range(name: str) -> dict[str, float]:
@@ -97,6 +110,30 @@ class HealthResponse(BaseModel):
     detail: str | None = None
 
 
+class GroundTruth(BaseModel):
+    event_id: str
+    is_anomaly: bool
+    anomaly_type: str
+
+
+class DemoEventsResponse(BaseModel):
+    seed: int
+    note: str
+    events: list[dict[str, Any]]
+    ground_truth: list[GroundTruth]
+
+
+def _load_demo_page() -> str:
+    return resources.files("vehicle_anomaly").joinpath("static", "demo.html").read_text(encoding="utf-8")
+
+
+def _read_report(path: Path) -> dict[str, Any] | None:
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
 def _predictor(request: Request) -> AnomalyPredictor:
     predictor: AnomalyPredictor | None = getattr(request.app.state, "predictor", None)
     if predictor is None:
@@ -134,9 +171,12 @@ def create_app(config: AppConfig | None = None, predictor: AnomalyPredictor | No
         app.state.load_error = None
         if app.state.predictor is None:
             try:
-                app.state.predictor = AnomalyPredictor.load(app_config.paths.model_dir)
+                app.state.predictor = AnomalyPredictor.load(
+                    app_config.paths.model_dir, n_jobs=app_config.api.inference_threads
+                )
                 logger.info("Model loaded", extra={"model": app.state.predictor.model_name,
-                                                   "model_dir": str(app_config.paths.model_dir)})
+                                                   "model_dir": str(app_config.paths.model_dir),
+                                                   "inference_threads": app_config.api.inference_threads})
             except (ModelArtifactsError, OSError, KeyError, ValueError) as exc:
                 app.state.load_error = str(exc)
                 logger.error("Model could not be loaded; serving in degraded mode", extra={"error": str(exc)})
@@ -159,13 +199,18 @@ def create_app(config: AppConfig | None = None, predictor: AnomalyPredictor | No
                                       "status_code": response.status_code, "duration_ms": round(elapsed_ms, 3)})
         return response
 
-    @app.get("/", include_in_schema=False)
-    async def root() -> RedirectResponse:
-        return RedirectResponse(url="/docs")
+    demo_page = _load_demo_page()
 
-    @app.get("/health", response_model=HealthResponse)
-    async def health(request: Request) -> HealthResponse:
+    @app.get("/", include_in_schema=False)
+    async def root() -> HTMLResponse:
+        return HTMLResponse(demo_page)
+
+    @app.get("/health", response_model=HealthResponse, responses={503: {"model": HealthResponse}})
+    async def health(request: Request, response: Response) -> HealthResponse:
         predictor_obj = getattr(request.app.state, "predictor", None)
+        if predictor_obj is None:
+            # 503 makes platform health checks (e.g. Render) reject a deploy without a usable model.
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return HealthResponse(
             status="ok" if predictor_obj else "degraded",
             model_loaded=predictor_obj is not None,
@@ -199,6 +244,40 @@ def create_app(config: AppConfig | None = None, predictor: AnomalyPredictor | No
             anomaly_count=sum(p.is_anomaly for p in predictions),
             predictions=predictions,
         )
+
+    @app.get("/demo/events", response_model=DemoEventsResponse, tags=["demo"])
+    def demo_events(
+        n: int = Query(20, ge=1, le=DEMO_MAX_EVENTS, description="Number of events"),
+        anomaly_rate: float = Query(0.1, ge=0.0, le=0.5, description="Share of injected anomalies"),
+        seed: int | None = Query(None, ge=0, le=2**31 - 1, description="Seed for reproducible output"),
+    ) -> DemoEventsResponse:
+        """Fresh synthetic telemetry for the demo. Ground-truth labels are returned separately and are
+        never part of the event payload sent to the model."""
+        seed_value = seed if seed is not None else time.time_ns() % (2**31)
+        frame = sample_demo_events(n, anomaly_rate, seed_value)
+        return DemoEventsResponse(
+            seed=seed_value,
+            note="Synthetic events from vehicle_anomaly.data_generator; labels are for comparison only.",
+            events=frame.loc[:, list(REQUIRED_FIELDS)].to_dict("records"),
+            ground_truth=[
+                GroundTruth(event_id=row.event_id, is_anomaly=bool(getattr(row, LABEL_COLUMN)),
+                            anomaly_type=str(getattr(row, ANOMALY_TYPE_COLUMN)))
+                for row in frame.itertuples(index=False)
+            ],
+        )
+
+    @app.get("/demo/reports", tags=["demo"])
+    def demo_reports(request: Request) -> dict[str, Any]:
+        """Offline reports: model evaluation, inference benchmark and streaming run summary."""
+        reports_dir = request.app.state.config.paths.reports_dir
+        return {key: _read_report(reports_dir / name) for key, name in REPORT_FILES.items()}
+
+    @app.get("/demo/figures/{name}", tags=["demo"], response_class=FileResponse)
+    def demo_figure(name: str, request: Request) -> FileResponse:
+        figure = request.app.state.config.paths.figures_dir / name
+        if not _FIGURE_NAME.fullmatch(name) or not figure.is_file():
+            raise HTTPException(status_code=404, detail="Figure not found")
+        return FileResponse(figure, media_type="image/png", headers={"Cache-Control": "public, max-age=3600"})
 
     return app
 

@@ -29,6 +29,9 @@ dev = ["pytest>=8,<9", "httpx>=0.27,<1"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+vehicle_anomaly = ["static/*.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"

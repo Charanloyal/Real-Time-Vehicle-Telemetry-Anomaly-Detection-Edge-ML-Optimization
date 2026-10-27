@@ -13,6 +13,7 @@ import json
 import os
 from collections import Counter
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -233,6 +234,32 @@ def generate_telemetry(
     for name, (low, high) in VALID_RANGES.items():
         df[name] = df[name].clip(low, high)
     return df
+
+
+def sample_demo_events(
+    n: int, anomaly_rate: float, seed: int, num_vehicles: int = 4, warmup_events: int = 1500
+) -> pd.DataFrame:
+    """Fresh labelled events for the live demo, with recent timestamps.
+
+    Each vehicle is simulated for ``warmup_events`` first (engine warm-up takes ~5 time constants of
+    200-400 s) so samples reflect typical warm-engine driving. The same seed returns the same readings.
+    """
+    if n < 1:
+        raise ValueError("n must be >= 1")
+    per_vehicle = warmup_events + max(2, -(-n // num_vehicles))
+    end = datetime.now(timezone.utc).replace(microsecond=0)
+    # generate_telemetry adds a random per-vehicle offset of up to 3600 s; keep every timestamp <= now.
+    start = end - timedelta(seconds=per_vehicle + 3600)
+    df = generate_telemetry(
+        num_vehicles=num_vehicles,
+        events_per_vehicle=per_vehicle,
+        anomaly_rate=anomaly_rate,
+        seed=seed,
+        start_time=start.isoformat(),
+        vehicle_prefix=f"LIVE{seed % 10000:04d}",
+    )
+    df = df[df.groupby("vehicle_id").cumcount() >= warmup_events]
+    return df.sample(n=n, random_state=seed).sort_values(["event_timestamp", "event_id"]).reset_index(drop=True)
 
 
 @dataclass

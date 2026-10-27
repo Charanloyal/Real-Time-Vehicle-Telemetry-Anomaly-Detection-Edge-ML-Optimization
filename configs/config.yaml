@@ -1,6 +1,6 @@
 # Vehicle telemetry anomaly detection - central configuration.
 # Relative paths are resolved against the project root (the parent of the configs/ folder).
-# Environment overrides: VTAD_CONFIG (config file path), VTAD_MODEL_DIR, LOG_LEVEL, PORT.
+# Environment overrides: VTAD_CONFIG (config file path), VTAD_MODEL_DIR, VTAD_INFERENCE_THREADS, LOG_LEVEL, PORT.
 
 random_seed: 42
 
@@ -76,6 +76,7 @@ streaming:
 api:
   max_batch_size: 1000
   default_port: 8000
+  inference_threads: null     # null = library default (all cores); set 1 on small shared-CPU hosts
 
 logging:
   level: INFO

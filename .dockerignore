@@ -1,4 +1,5 @@
 .git
+.github
 .venv
 venv
 **/__pycache__
@@ -8,13 +9,17 @@ venv
 build
 dist
 .env
-data/raw
-data/processed
-data/streaming_input
-data/streaming_output
-data/checkpoints
+.env.*
+data
 artifacts/models/*.joblib
 artifacts/models/metadata.json
-reports
+tests
+# Reports are regenerated during the image build, except the benchmark measured on a dev machine.
+reports/*
+!reports/benchmark_results.json
+!reports/benchmark_results.md
+!reports/figures
+reports/figures/*
+!reports/figures/benchmark_latency.png
 .vscode
 .idea

@@ -55,20 +55,23 @@ class AnomalyPredictor:
         model_name: str,
         threshold: float,
         metadata: dict[str, Any] | None = None,
+        n_jobs: int | None = None,
     ) -> None:
         self.preprocessor = preprocessor
         self.model = model
         self.model_name = model_name
         self.threshold = float(threshold)
         self.metadata = metadata or {}
+        self.n_jobs = n_jobs
         imputer = preprocessor.named_steps["imputer"]
         self._fill_values = np.asarray(imputer.statistics_, dtype=np.float64)
         if self._fill_values.shape[0] != len(FEATURE_COLUMNS):
             raise ModelArtifactsError("Preprocessor feature count does not match the schema")
-        self._score_fn = self._build_score_fn(model)
+        self._score_fn = self._build_score_fn(model, n_jobs)
 
     @classmethod
-    def load(cls, model_dir: Path, model_name: str | None = None) -> "AnomalyPredictor":
+    def load(cls, model_dir: Path, model_name: str | None = None, n_jobs: int | None = None) -> "AnomalyPredictor":
+        """Load artifacts. ``n_jobs`` caps inference threads (useful on small shared-CPU hosts)."""
         metadata = load_metadata(model_dir)
         name = model_name or metadata["selected_model"]
         if name not in metadata.get("models", {}):
@@ -83,10 +86,11 @@ class AnomalyPredictor:
             model_name=name,
             threshold=metadata["models"][name]["threshold"],
             metadata=metadata,
+            n_jobs=n_jobs,
         )
 
     @staticmethod
-    def _build_score_fn(model: Any) -> Callable[[np.ndarray], np.ndarray]:
+    def _build_score_fn(model: Any, n_jobs: int | None = None) -> Callable[[np.ndarray], np.ndarray]:
         try:
             from xgboost import XGBClassifier
         except ImportError:  # pragma: no cover - xgboost is optional at runtime
@@ -94,6 +98,8 @@ class AnomalyPredictor:
 
         if XGBClassifier is not None and isinstance(model, XGBClassifier):
             booster = model.get_booster()
+            if n_jobs is not None:
+                booster.set_param({"nthread": n_jobs})
             best_iteration = getattr(model, "best_iteration", None)
             iteration_range = (0, int(best_iteration) + 1) if best_iteration is not None else (0, 0)
 
@@ -111,6 +117,9 @@ class AnomalyPredictor:
         if "n_jobs" in model.get_params():
             single_threaded = copy.copy(model)
             single_threaded.set_params(n_jobs=1)
+            if n_jobs is not None:
+                model = copy.copy(model)
+                model.set_params(n_jobs=n_jobs)
 
         def score_sklearn(X: np.ndarray) -> np.ndarray:
             estimator = single_threaded if X.shape[0] < SMALL_BATCH_ROWS else model
@@ -177,6 +186,7 @@ class AnomalyPredictor:
             "model_name": self.model_name,
             "model_type": type(self.model).__name__,
             "threshold": self.threshold,
+            "inference_threads": self.n_jobs,
             "feature_columns": list(FEATURE_COLUMNS),
             "required_input_fields": list(MODEL_INPUT_FIELDS),
             "trained_at": self.metadata.get("created_at"),

@@ -63,6 +63,18 @@ def test_optimized_scores_match_reference_pipeline(trained_config: AppConfig, te
         np.testing.assert_allclose(single, reference[:50], rtol=0, atol=1e-6)
 
 
+def test_thread_limit_does_not_change_scores(trained_config: AppConfig, test_events: list[dict]) -> None:
+    events = test_events * 2  # > SMALL_BATCH_ROWS so the multi-threaded estimator path is used
+    for name in _model_names(trained_config):
+        default = AnomalyPredictor.load(trained_config.paths.model_dir, name)
+        limited = AnomalyPredictor.load(trained_config.paths.model_dir, name, n_jobs=1)
+        np.testing.assert_allclose(
+            [p.anomaly_score for p in limited.predict_records(events)],
+            [p.anomaly_score for p in default.predict_records(events)],
+            rtol=0, atol=1e-9,
+        )
+
+
 def test_predict_one_returns_prediction(predictor: AnomalyPredictor, test_events: list[dict]) -> None:
     prediction = predictor.predict_one(test_events[0])
     assert prediction.event_id == test_events[0]["event_id"]

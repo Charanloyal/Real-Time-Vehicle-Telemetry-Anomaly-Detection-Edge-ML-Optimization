@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any, TypeVar
 
@@ -12,6 +12,7 @@ import yaml
 CONFIG_ENV_VAR = "VTAD_CONFIG"
 MODEL_DIR_ENV_VAR = "VTAD_MODEL_DIR"
 LOG_LEVEL_ENV_VAR = "LOG_LEVEL"
+INFERENCE_THREADS_ENV_VAR = "VTAD_INFERENCE_THREADS"
 DEFAULT_CONFIG_RELATIVE = Path("configs") / "config.yaml"
 
 
@@ -93,6 +94,7 @@ class StreamingConfig:
 class ApiConfig:
     max_batch_size: int = 1000
     default_port: int = 8000
+    inference_threads: int | None = None
 
 
 @dataclass(frozen=True)
@@ -176,6 +178,13 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     level_override = os.environ.get(LOG_LEVEL_ENV_VAR)
     if level_override:
         logging_cfg = LoggingConfig(level=level_override.upper(), json=logging_cfg.json)
+    api_cfg = _build_section(ApiConfig, raw.get("api"), "api")
+    threads_override = os.environ.get(INFERENCE_THREADS_ENV_VAR)
+    if threads_override:
+        try:
+            api_cfg = replace(api_cfg, inference_threads=int(threads_override))
+        except ValueError as exc:
+            raise ConfigError(f"{INFERENCE_THREADS_ENV_VAR} must be an integer") from exc
 
     config = AppConfig(
         project_root=project_root,
@@ -186,7 +195,7 @@ def load_config(path: str | Path | None = None) -> AppConfig:
         training=_build_section(TrainingConfig, raw.get("training"), "training"),
         benchmark=_build_section(BenchmarkConfig, raw.get("benchmark"), "benchmark"),
         streaming=_build_section(StreamingConfig, raw.get("streaming"), "streaming"),
-        api=_build_section(ApiConfig, raw.get("api"), "api"),
+        api=api_cfg,
         logging=logging_cfg,
     )
     _validate(config)
@@ -213,3 +222,5 @@ def _validate(config: AppConfig) -> None:
             raise ConfigError(f"{name} must be in [0, 1)")
     if config.api.max_batch_size < 1:
         raise ConfigError("api.max_batch_size must be >= 1")
+    if config.api.inference_threads is not None and config.api.inference_threads < 1:
+        raise ConfigError("api.inference_threads must be >= 1 or null")

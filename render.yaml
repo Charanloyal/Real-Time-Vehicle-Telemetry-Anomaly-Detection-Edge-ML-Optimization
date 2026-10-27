@@ -1,0 +1,23 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+# Create the service from the Render dashboard (New > Blueprint) or with the "Deploy to Render" button
+# in README.md. Render builds ./Dockerfile, injects PORT, and routes traffic only after /health returns 200.
+services:
+  - type: web
+    name: vehicle-telemetry-anomaly-detection
+    runtime: docker
+    plan: free
+    region: oregon
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    # Deploy a new commit only after its GitHub Actions checks (tests + Docker smoke test) pass.
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: LOG_LEVEL
+        value: INFO
+      # The free plan has a fraction of one CPU; extra inference threads only add contention.
+      - key: VTAD_INFERENCE_THREADS
+        value: "1"
+      - key: OMP_NUM_THREADS
+        value: "1"

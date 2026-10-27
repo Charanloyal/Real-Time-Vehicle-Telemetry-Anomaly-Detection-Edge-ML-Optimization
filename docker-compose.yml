@@ -2,7 +2,7 @@ services:
   api:
     build:
       context: .
-      target: api
+      dockerfile: Dockerfile
     image: vehicle-telemetry-anomaly-api:latest
     environment:
       PORT: "8000"
@@ -16,7 +16,7 @@ services:
   spark-streaming:
     build:
       context: .
-      target: spark
+      dockerfile: Dockerfile.spark
     image: vehicle-telemetry-anomaly-spark:latest
     profiles: ["spark"]
     environment:

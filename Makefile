@@ -2,7 +2,7 @@
 PYTHON ?= .venv/bin/python
 PORT ?= 8000
 
-.PHONY: venv install install-spark data train evaluate benchmark api smoke stream test docker-build docker-run clean
+.PHONY: venv install install-spark data train evaluate benchmark api smoke deploy-smoke stream test docker-build docker-run clean
 
 venv:
 	python3 -m venv .venv
@@ -31,6 +31,10 @@ api:
 
 smoke:
 	$(PYTHON) scripts/api_smoke_test.py --url http://localhost:$(PORT)
+
+# Check a deployed instance, e.g. make deploy-smoke URL=https://<service>.onrender.com
+deploy-smoke:
+	$(PYTHON) scripts/deploy_smoke_test.py --url $(URL) --wait 120
 
 stream:
 	$(PYTHON) scripts/run_streaming.py --reset

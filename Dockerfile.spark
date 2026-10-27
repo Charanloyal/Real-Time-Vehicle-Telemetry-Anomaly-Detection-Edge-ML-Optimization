@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1
+# Optional PySpark Structured Streaming demo (Linux + Java 17). Not used by Render.
+#   docker compose --profile spark run --rm spark-streaming
+
+FROM python:3.11-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    MPLBACKEND=Agg \
+    VTAD_CONFIG=/app/configs/config.yaml
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libgomp1 openjdk-17-jre-headless procps \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt requirements-spark.txt ./
+RUN sed -E 's/^xgboost([<>=! ]|$)/xgboost-cpu\1/' requirements.txt > /tmp/requirements.txt \
+    && pip install -r /tmp/requirements.txt -r requirements-spark.txt
+
+COPY pyproject.toml README.md ./
+COPY src ./src
+RUN pip install --no-deps .
+COPY configs ./configs
+COPY scripts ./scripts
+
+RUN python scripts/generate_data.py --target training && python scripts/train_model.py
+
+RUN useradd --create-home --uid 10001 appuser && chown -R appuser /app
+USER appuser
+CMD ["sh", "-c", "python scripts/generate_data.py --target streaming && python scripts/run_streaming.py --engine spark --reset && cat reports/streaming_summary.md"]

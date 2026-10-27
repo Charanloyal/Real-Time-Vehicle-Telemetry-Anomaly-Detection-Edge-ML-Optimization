@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from vehicle_anomaly.config import MODEL_DIR_ENV_VAR, ConfigError, load_config
+from vehicle_anomaly.config import INFERENCE_THREADS_ENV_VAR, MODEL_DIR_ENV_VAR, ConfigError, load_config
 
 REPO_CONFIG = Path(__file__).resolve().parents[1] / "configs" / "config.yaml"
 
@@ -20,6 +20,16 @@ def test_repo_config_loads_with_absolute_paths() -> None:
 def test_model_dir_env_override(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv(MODEL_DIR_ENV_VAR, str(tmp_path))
     assert load_config(REPO_CONFIG).paths.model_dir == tmp_path.resolve()
+
+
+def test_inference_threads_env_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    assert load_config(REPO_CONFIG).api.inference_threads is None
+    monkeypatch.setenv(INFERENCE_THREADS_ENV_VAR, "1")
+    assert load_config(REPO_CONFIG).api.inference_threads == 1
+    for bad in ("zero", "0"):
+        monkeypatch.setenv(INFERENCE_THREADS_ENV_VAR, bad)
+        with pytest.raises(ConfigError, match="inference_threads|VTAD_INFERENCE_THREADS"):
+            load_config(REPO_CONFIG)
 
 
 def test_unknown_key_rejected(tmp_path: Path) -> None:
