@@ -525,10 +525,12 @@ The container runs as a non-root user, binds `0.0.0.0:$PORT` and has a `/health`
 
 [render.yaml](render.yaml) is a [Render Blueprint](https://render.com/docs/blueprint-spec). It defines one
 **free** Docker web service: Render builds `./Dockerfile`, injects `PORT`, and only routes traffic to a new
-deploy once `GET /health` returns 200. With `autoDeployTrigger: checksPass`, later pushes to `main` are
-deployed only after the GitHub Actions checks pass. It sets `VTAD_RUNTIME=onnx` (serve the ONNX exports with
-ONNX Runtime), `VTAD_INFERENCE_THREADS=1` and `OMP_NUM_THREADS=1`, because the free instance has a fraction of
-one CPU. The file was validated against Render's published JSON schema.
+deploy once `GET /health` returns 200. `autoDeployTrigger: commit` deploys every push to `main`, while CI runs
+in parallel. (`checksPass` would wait for *every* GitHub check. On this repository, third-party apps installed
+on the account, such as Vercel and CodeRabbit, leave check suites queued forever, which blocked deploys.) It sets
+`VTAD_RUNTIME=onnx` (serve the ONNX exports with ONNX Runtime), `VTAD_INFERENCE_THREADS=1` and
+`OMP_NUM_THREADS=1`, because the free instance has a fraction of one CPU. The file was validated against
+Render's published JSON schema.
 
 1. Click **Deploy to Render** at the top of this README, or in the Render dashboard choose
    **New > Blueprint** and select this repository.
