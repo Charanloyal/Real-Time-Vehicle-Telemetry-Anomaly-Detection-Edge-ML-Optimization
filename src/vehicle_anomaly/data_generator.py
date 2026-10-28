@@ -1,9 +1,10 @@
 """Synthetic vehicle telemetry generator.
 
 All data produced here is synthetic. Each vehicle follows a simple driving simulation (speed regimes
-with first-order dynamics, gear-based RPM, engine warm-up, fuel burn, GPS drift). Labelled anomalies
-are injected as single-event faults. Streaming files additionally contain malformed and duplicate
-events to exercise validation and de-duplication.
+with first-order dynamics, gear-based RPM, engine warm-up or a warm mid-trip start, fuel burn, GPS
+drift). Labelled anomalies are injected as single-event faults and as gradual drifts relative to the
+vehicle's own baseline. Streaming files additionally contain malformed and duplicate events to
+exercise validation and de-duplication.
 """
 
 from __future__ import annotations
@@ -12,10 +13,11 @@ import argparse
 import json
 import os
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -24,10 +26,11 @@ from vehicle_anomaly.config import AppConfig, load_config
 from vehicle_anomaly.logging_utils import configure_logging, get_logger
 from vehicle_anomaly.schema import (
     ANOMALY_TYPE_COLUMN,
-    ANOMALY_TYPES,
+    DRIFT_ANOMALY_TYPES,
     LABEL_COLUMN,
     NORMAL_TYPE,
     NUMERIC_FIELDS,
+    POINT_ANOMALY_TYPES,
     REQUIRED_FIELDS,
     VALID_RANGES,
 )
@@ -57,9 +60,7 @@ MALFORMED_KINDS: tuple[str, ...] = (
 )
 
 
-def _speed_profile(
-    rng: np.random.Generator, n: int, interval: float, hard_braking_rate: float
-) -> np.ndarray:
+def _speed_profile(rng: np.random.Generator, n: int, interval: float, hard_braking_rate: float) -> np.ndarray:
     targets = np.empty(n)
     i = 0
     while i < n:
@@ -90,6 +91,7 @@ def _simulate_vehicle(
     hard_braking_rate: float,
     base_lat: float,
     base_lon: float,
+    warm_start: bool,
 ) -> dict[str, np.ndarray]:
     speed = _speed_profile(rng, n, interval, hard_braking_rate)
     acceleration = np.diff(speed, prepend=speed[0]) / 3.6 / interval
@@ -102,10 +104,11 @@ def _simulate_vehicle(
     ) + rng.normal(0, 90, n)
     rpm = np.clip(rpm, 600, None)
 
-    ambient = rng.uniform(5, 35)
     # Per-vehicle baselines (engine condition, battery health) create overlap between a healthy
     # vehicle's tail and another vehicle's mild anomaly, so the model must generalise across vehicles.
     operating = rng.uniform(84, 97)
+    # A recording starts either with a cold engine or mid-trip with the engine already warm.
+    ambient = operating if warm_start else rng.uniform(5, 35)
     elapsed = np.arange(n) * interval
     temperature = (
         operating
@@ -149,16 +152,63 @@ def _simulate_vehicle(
     }
 
 
+def _inject_drift(
+    rng: np.random.Generator,
+    values: dict[str, np.ndarray],
+    labels: np.ndarray,
+    episodes_per_1000_events: float,
+    warm_start: bool,
+) -> None:
+    """Gradual faults: a linear ramp away from the vehicle's baseline.
+
+    Only the part of a ramp that has moved clearly away from the baseline (>= 4 deg C or <= -0.5 V) is
+    labelled anomalous; the first minutes of a drift are indistinguishable from normal noise. Drifts start
+    after the engine has warmed up (cold starts) or after a short history (warm starts).
+    """
+    n = len(labels)
+    min_start = 300 if warm_start else 1200
+    count = int(rng.poisson(episodes_per_1000_events * n / 1000)) if episodes_per_1000_events > 0 else 0
+    for _ in range(count):
+        kind = DRIFT_ANOMALY_TYPES[int(rng.integers(0, len(DRIFT_ANOMALY_TYPES)))]
+        if kind == "gradual_overheating":
+            duration, peak, column, label_at, sign = (
+                int(rng.integers(90, 241)),
+                rng.uniform(10, 22),
+                "engine_temperature",
+                4.0,
+                1.0,
+            )
+        else:
+            duration, peak, column, label_at, sign = (
+                int(rng.integers(120, 301)),
+                rng.uniform(1.0, 1.8),
+                "battery_voltage",
+                0.5,
+                -1.0,
+            )
+        if n - duration <= min_start:
+            continue
+        start = int(rng.integers(min_start, n - duration))
+        idx = np.arange(start, start + duration)
+        offset = peak * (idx - start + 1) / duration
+        values[column][idx] += sign * offset
+        flagged = idx[offset >= label_at]
+        labels[flagged] = kind
+
+
 def _inject_anomalies(
-    rng: np.random.Generator, values: dict[str, np.ndarray], anomaly_rate: float, interval: float
-) -> np.ndarray:
+    rng: np.random.Generator,
+    values: dict[str, np.ndarray],
+    labels: np.ndarray,
+    anomaly_rate: float,
+    interval: float,
+) -> None:
     n = len(values["speed"])
-    labels = np.full(n, NORMAL_TYPE, dtype=object)
     candidates = np.flatnonzero(rng.random(n) < anomaly_rate)
     candidates = candidates[candidates > 0]
-    kinds = rng.integers(0, len(ANOMALY_TYPES), len(candidates))
-    for idx, kind_idx in zip(candidates, kinds):
-        kind = ANOMALY_TYPES[kind_idx]
+    kinds = rng.integers(0, len(POINT_ANOMALY_TYPES), len(candidates))
+    for idx, kind_idx in zip(candidates.tolist(), kinds.tolist(), strict=True):
+        kind = POINT_ANOMALY_TYPES[kind_idx]
         labels[idx] = kind
         prev_speed = values["speed"][idx - 1]
         if kind == "overheating":
@@ -176,15 +226,12 @@ def _inject_anomalies(
             if accel < 0:
                 values["brake_pressure"][idx] = rng.uniform(70, 160)
         elif kind == "battery_voltage":
-            values["battery_voltage"][idx] = (
-                rng.uniform(11.0, 13.2) if rng.random() < 0.5 else rng.uniform(14.9, 16.5)
-            )
+            values["battery_voltage"][idx] = rng.uniform(11.0, 13.2) if rng.random() < 0.5 else rng.uniform(14.9, 16.5)
         elif kind == "sensor_combination":
             accel = rng.uniform(0.8, 3.0)
             values["acceleration"][idx] = accel
             values["speed"][idx] = prev_speed + accel * 3.6 * interval
             values["brake_pressure"][idx] = rng.uniform(20, 80)
-    return labels
 
 
 def generate_telemetry(
@@ -198,6 +245,9 @@ def generate_telemetry(
     base_latitude: float = 40.0,
     base_longitude: float = -95.0,
     vehicle_prefix: str = "VEH",
+    drift_episodes_per_1000_events: float = 0.0,
+    warm_start_rate: float = 0.5,
+    max_start_offset_seconds: int = 3600,
 ) -> pd.DataFrame:
     """Generate a labelled telemetry DataFrame. Same arguments always produce identical output."""
     if num_vehicles < 1 or events_per_vehicle < 2:
@@ -209,11 +259,20 @@ def generate_telemetry(
     frames = []
     for vehicle_idx, child in enumerate(children):
         rng = np.random.default_rng(child)
+        warm_start = bool(rng.random() < warm_start_rate)
         values = _simulate_vehicle(
-            rng, events_per_vehicle, event_interval_seconds, hard_braking_rate, base_latitude, base_longitude
+            rng,
+            events_per_vehicle,
+            event_interval_seconds,
+            hard_braking_rate,
+            base_latitude,
+            base_longitude,
+            warm_start,
         )
-        anomaly_types = _inject_anomalies(rng, values, anomaly_rate, event_interval_seconds)
-        offset_seconds = float(rng.integers(0, 3600))
+        anomaly_types = np.full(events_per_vehicle, NORMAL_TYPE, dtype=object)
+        _inject_drift(rng, values, anomaly_types, drift_episodes_per_1000_events, warm_start)
+        _inject_anomalies(rng, values, anomaly_types, anomaly_rate, event_interval_seconds)
+        offset_seconds = float(rng.integers(0, max_start_offset_seconds + 1))
         timestamps = start + pd.to_timedelta(
             offset_seconds + np.arange(events_per_vehicle) * event_interval_seconds, unit="s"
         )
@@ -236,30 +295,38 @@ def generate_telemetry(
     return df
 
 
-def sample_demo_events(
-    n: int, anomaly_rate: float, seed: int, num_vehicles: int = 4, warmup_events: int = 1500
-) -> pd.DataFrame:
-    """Fresh labelled events for the live demo, with recent timestamps.
+DEMO_FLEET_VEHICLES = 4
+DEMO_EVENTS_PER_VEHICLE = 1000
+DEMO_STREAM_LENGTH = DEMO_FLEET_VEHICLES * DEMO_EVENTS_PER_VEHICLE
 
-    Each vehicle is simulated for ``warmup_events`` first (engine warm-up takes ~5 time constants of
-    200-400 s) so samples reflect typical warm-engine driving. The same seed returns the same readings.
-    """
-    if n < 1:
-        raise ValueError("n must be >= 1")
-    per_vehicle = warmup_events + max(2, -(-n // num_vehicles))
-    end = datetime.now(timezone.utc).replace(microsecond=0)
-    # generate_telemetry adds a random per-vehicle offset of up to 3600 s; keep every timestamp <= now.
-    start = end - timedelta(seconds=per_vehicle + 3600)
+
+@lru_cache(maxsize=16)
+def _demo_fleet(seed: int, anomaly_rate: float, drift_rate: float) -> pd.DataFrame:
     df = generate_telemetry(
-        num_vehicles=num_vehicles,
-        events_per_vehicle=per_vehicle,
+        num_vehicles=DEMO_FLEET_VEHICLES,
+        events_per_vehicle=DEMO_EVENTS_PER_VEHICLE,
         anomaly_rate=anomaly_rate,
         seed=seed,
-        start_time=start.isoformat(),
         vehicle_prefix=f"LIVE{seed % 10000:04d}",
+        drift_episodes_per_1000_events=drift_rate,
+        warm_start_rate=1.0,
+        max_start_offset_seconds=3,
     )
-    df = df[df.groupby("vehicle_id").cumcount() >= warmup_events]
-    return df.sample(n=n, random_state=seed).sort_values(["event_timestamp", "event_id"]).reset_index(drop=True)
+    return df.sort_values(["event_timestamp", "vehicle_id"], kind="stable").reset_index(drop=True)
+
+
+def demo_fleet_events(seed: int, start: int, n: int, anomaly_rate: float, drift_rate: float) -> pd.DataFrame:
+    """A contiguous slice of a deterministic 4-vehicle live-demo stream (time-ordered, labelled).
+
+    Vehicles start mid-trip with warm engines and drive concurrently, so consecutive slices form a
+    realistic stream for per-vehicle window features. The whole fleet is generated once per
+    ``(seed, anomaly_rate, drift_rate)`` and cached.
+    """
+    if n < 1 or start < 0 or start + n > DEMO_STREAM_LENGTH:
+        raise ValueError(
+            f"Requested events [{start}, {start + n}) are outside the demo stream (0-{DEMO_STREAM_LENGTH})"
+        )
+    return _demo_fleet(seed, anomaly_rate, drift_rate).iloc[start : start + n].reset_index(drop=True)
 
 
 @dataclass
@@ -323,15 +390,15 @@ def write_streaming_files(
     rng = np.random.default_rng(seed)
     output_dir.mkdir(parents=True, exist_ok=True)
     events = events.sort_values(["event_timestamp", "event_id"], kind="stable").reset_index(drop=True)
-    records = events.loc[:, list(REQUIRED_FIELDS)].to_dict("records")
+    records = cast(list[dict[str, Any]], events.loc[:, list(REQUIRED_FIELDS)].to_dict("records"))
 
     n = len(records)
     order = rng.permutation(n)
-    n_malformed = int(round(n * malformed_rate))
-    n_duplicates = int(round(n * duplicate_rate))
+    n_malformed = round(n * malformed_rate)
+    n_duplicates = round(n * duplicate_rate)
     malformed_idx = set(order[:n_malformed].tolist())
     duplicate_idx = set(order[n_malformed : n_malformed + n_duplicates].tolist())
-    kinds = Counter()
+    kinds: Counter[str] = Counter()
 
     summary = StreamingFilesSummary()
     for file_no, chunk in enumerate(np.array_split(np.arange(n), num_files), start=1):
@@ -370,6 +437,8 @@ def generate_training_data(config: AppConfig) -> pd.DataFrame:
         hard_braking_rate=gen.hard_braking_rate,
         base_latitude=gen.base_latitude,
         base_longitude=gen.base_longitude,
+        drift_episodes_per_1000_events=gen.drift_episodes_per_1000_events,
+        warm_start_rate=gen.warm_start_rate,
     )
     path = config.paths.raw_data
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -396,6 +465,8 @@ def generate_streaming_data(config: AppConfig, clean_existing: bool = True) -> S
         base_latitude=gen.base_latitude,
         base_longitude=gen.base_longitude,
         vehicle_prefix="STR",
+        drift_episodes_per_1000_events=stream.drift_episodes_per_1000_events,
+        warm_start_rate=gen.warm_start_rate,
     ).iloc[: stream.num_files * stream.events_per_file]
 
     input_dir = config.paths.streaming_input

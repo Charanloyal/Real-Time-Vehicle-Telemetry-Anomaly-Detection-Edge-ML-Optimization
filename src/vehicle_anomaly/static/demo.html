@@ -61,7 +61,7 @@
 <body>
 <header>
   <h1>Real-Time Vehicle Telemetry Anomaly Detection</h1>
-  <p>Scores vehicle telemetry with a trained scikit-learn / XGBoost model served by FastAPI, using an optimized NumPy inference path.</p>
+  <p>Scores vehicle telemetry with scikit-learn / XGBoost models served by FastAPI: a point model that sees one event, and a window model that also uses each vehicle's own history. Serving uses ONNX Runtime when enabled.</p>
   <div class="links">
     <a href="/docs">API docs (Swagger)</a>
     <a href="/model-info">/model-info</a>
@@ -74,14 +74,14 @@
 
 <main>
   <section class="half">
-    <h2>Model</h2>
-    <p class="sub">Loaded once at startup. Metrics come from the held-out test vehicles, which the model never saw during training or threshold tuning.</p>
+    <h2>Models</h2>
+    <p class="sub">Loaded once at startup. Metrics come from the held-out test vehicles, which the models never saw during training or threshold tuning.</p>
     <div id="model" class="grid"><div class="muted">Loading&hellip;</div></div>
   </section>
 
   <section class="half">
     <h2>Score one event</h2>
-    <p class="sub">Pick a scenario or edit the readings, then send them to <code>POST /predict</code>.</p>
+    <p class="sub">Pick a scenario or edit the readings, then send them to <code>POST /predict</code> (point model: this event only, no history).</p>
     <div class="row presets" id="presets"></div>
     <div class="grid" id="form" style="margin-top:12px"></div>
     <div class="row" style="margin-top:12px"><button id="score">Score event</button><span id="score-err" class="err"></span></div>
@@ -96,24 +96,27 @@
   </section>
 
   <section>
-    <h2>Live stream simulation</h2>
-    <p class="sub">The server generates fresh synthetic events, the browser sends each micro-batch to <code>POST /predict-batch</code>, and the predictions are compared with the generator's hidden ground truth. Labels are never sent to the model.</p>
+    <h2>Live stream: point model vs window model</h2>
+    <p class="sub">A synthetic 4-vehicle fleet streams in time order. Every micro-batch is scored twice: by the <strong>point model</strong> (<code>POST /predict-batch</code>, one event at a time) and by the <strong>window model</strong> (<code>POST /predict-stream</code>, per-vehicle history features; the browser sends back the state returned by the previous call). Predictions are compared with the generator's hidden ground truth; labels are never sent to the models. Gradual faults (<em>gradual_overheating</em>, <em>battery_degradation</em>) drift away from a vehicle's own baseline and are the cases where history matters. They begin once each vehicle has about 5 simulated minutes of history (roughly stream position 1,200, about 30 seconds at the default batch size).</p>
     <div class="row">
       <button id="start">Start stream</button>
       <button id="stop" class="secondary" disabled>Stop</button>
       <label for="batch" style="margin:0 0 0 8px">Batch size</label>
-      <select id="batch" style="width:auto"><option>10</option><option selected>25</option><option>50</option><option>100</option></select>
-      <label for="rate" style="margin:0 0 0 8px">Anomaly rate</label>
-      <select id="rate" style="width:auto"><option value="0.05">5%</option><option value="0.1" selected>10%</option><option value="0.2">20%</option></select>
+      <select id="batch" style="width:auto"><option>10</option><option>25</option><option selected>50</option><option>100</option></select>
+      <label for="rate" style="margin:0 0 0 8px">Single-event faults</label>
+      <select id="rate" style="width:auto"><option value="0.02">2%</option><option value="0.05" selected>5%</option><option value="0.1">10%</option></select>
+      <label for="drift" style="margin:0 0 0 8px">Gradual faults</label>
+      <select id="drift" style="width:auto"><option value="0">off</option><option value="3" selected>normal</option><option value="6">frequent</option></select>
       <span id="stream-err" class="err"></span>
     </div>
-    <div class="grid" style="margin-top:14px" id="stream-stats"></div>
+    <div class="table-wrap" style="margin-top:14px"><table id="compare"></table></div>
+    <p class="muted" style="font-size:.8rem;margin:6px 0 0">How to read “false alarms”: a gradual fault is labelled anomalous only once it has drifted ≥ 4 °C or ≥ 0.5 V, so alarms raised while a drift is still building count as false here. Measured offline on 5 full demo streams (20,000 events): 70% of the window model's false alarms came within 150 events before a labelled drift (early warnings), and 26% fell in each vehicle's first 200 events, while its baseline is still forming.</p>
     <div style="margin-top:14px"><svg id="chart" viewBox="0 0 1000 170" preserveAspectRatio="none" role="img" aria-label="Anomaly scores over time"></svg></div>
-    <div class="muted" style="font-size:.8rem;margin-top:4px">Anomaly score per event (last 300). Dots: <span style="color:#f43f5e">&#9679; correct detection</span> &middot; <span style="color:#f59e0b">&#9679; false alarm</span> &middot; <span style="color:#a78bfa">&#9679; missed anomaly</span>. Dashed line: decision threshold.</div>
+    <div class="muted" style="font-size:.8rem;margin-top:4px">Scores per event (last 300): <span style="color:#22c55e">&#9473; window model</span> &middot; <span style="color:#38bdf8">&#9473; point model</span>. Dots mark ground-truth anomalies: <span style="color:#f43f5e">&#9679; caught by both</span> &middot; <span style="color:#22c55e">&#9679; window only</span> &middot; <span style="color:#38bdf8">&#9679; point only</span> &middot; <span style="color:#a78bfa">&#9679; missed by both</span>.</div>
     <div class="table-wrap" style="margin-top:14px">
       <table>
-        <thead><tr><th>Time (UTC)</th><th>Vehicle</th><th>Speed</th><th>RPM</th><th>Temp &deg;C</th><th>Battery V</th><th>Accel</th><th>Brake</th><th>Score</th><th>Prediction</th><th>Ground truth</th></tr></thead>
-        <tbody id="rows"><tr><td colspan="11" class="muted">Press &ldquo;Start stream&rdquo;.</td></tr></tbody>
+        <thead><tr><th>Time (UTC)</th><th>Vehicle</th><th>Speed</th><th>RPM</th><th>Temp &deg;C</th><th>Battery V</th><th>Accel</th><th>Point score</th><th>Window score</th><th>Point</th><th>Window</th><th>Ground truth</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="12" class="muted">Press &ldquo;Start stream&rdquo;.</td></tr></tbody>
       </table>
     </div>
   </section>
@@ -194,13 +197,17 @@ async function loadModel() {
   try {
     const { body: m } = await api("/model-info");
     threshold = m.threshold;
-    const t = m.test_metrics || {};
     const v = m.library_versions || {};
-    $("model").innerHTML = [
-      stat("Model", m.model_name), stat("Type", m.model_type), stat("Decision threshold", fixed(m.threshold)),
-      stat("Test precision", fixed(t.precision)), stat("Test recall", fixed(t.recall)), stat("Test F1", fixed(t.f1)),
-      stat("Test ROC-AUC", fixed(t.roc_auc, 4)), stat("Inputs", `${m.required_input_fields.length} sensors`),
-    ].join("") + `<div class="muted" style="grid-column:1/-1;font-size:.8rem">Trained ${esc(m.trained_at)} &middot; scikit-learn ${esc(v["scikit-learn"])} &middot; xgboost ${esc(v.xgboost)} &middot; Python ${esc(v.python)}</div>`;
+    const card = (info, label) => {
+      if (!info) return stat(label, "not loaded");
+      const t = info.test_metrics || {}, r = info.test_recall_by_type || {};
+      return [
+        stat(label, `${info.model_name}`), stat("Test F1", fixed(t.f1)), stat("Test ROC-AUC", fixed(t.roc_auc, 4)),
+        stat("Recall: battery degradation", fixed(r.battery_degradation)),
+      ].join("");
+    };
+    $("model").innerHTML = card(m, "Point model") + card(m.window_model, "Window model")
+      + `<div class="muted" style="grid-column:1/-1;font-size:.8rem">Runtime: <strong>${esc(m.runtime)}</strong> &middot; trained ${esc(m.trained_at)} &middot; scikit-learn ${esc(v["scikit-learn"])} &middot; xgboost ${esc(v.xgboost)} &middot; Python ${esc(v.python)}. Full comparison incl. IsolationForest in the evaluation figures below.</div>`;
   } catch (e) { $("model").innerHTML = `<div class="err">${esc(e.message)}</div>`; }
 }
 
@@ -234,72 +241,117 @@ async function scoreOne() {
   finally { $("score").disabled = false; }
 }
 
-// ---- live stream ----
-const MAX_BATCHES = 120;
+// ---- live stream: point vs window ----
+const DRIFT_TYPES = new Set(["gradual_overheating", "battery_degradation"]);
 let running = false, batches = 0, points = [], recent = [];
-let totals = { scored: 0, flagged: 0, tp: 0, fp: 0, fn: 0, serverMs: 0 };
+let streamGeneration = 0, streamTimer = null;
+let stream = { seed: null, start: 0, state: null, rate: null, drift: null };
+let windowThreshold = 0.5;
+const emptyTotals = () => ({
+  events: 0, anomalies: 0, drift: 0, serverMs: { point: 0, window: 0 },
+  point: { tp: 0, fp: 0, fn: 0, driftTp: 0 }, window: { tp: 0, fp: 0, fn: 0, driftTp: 0 },
+});
+let totals = emptyTotals();
 
 function renderStreamStats() {
-  const precision = totals.tp + totals.fp ? totals.tp / (totals.tp + totals.fp) : null;
-  const recall = totals.tp + totals.fn ? totals.tp / (totals.tp + totals.fn) : null;
-  $("stream-stats").innerHTML = [
-    stat("Micro-batches", batches), stat("Events scored", totals.scored.toLocaleString("en-US")), stat("Flagged anomalies", totals.flagged.toLocaleString("en-US")),
-    stat("Precision vs truth", fixed(precision)), stat("Recall vs truth", fixed(recall)),
-    stat("Avg server ms / batch", batches ? fmt(totals.serverMs / batches, 2) : "–"),
-  ].join("");
+  const row = (label, key) => {
+    const m = totals[key];
+    const precision = m.tp + m.fp ? m.tp / (m.tp + m.fp) : null;
+    const recall = m.tp + m.fn ? m.tp / (m.tp + m.fn) : null;
+    const driftRecall = totals.drift ? m.driftTp / totals.drift : null;
+    return `<tr><td>${label}</td><td>${fixed(precision)}</td><td>${fixed(recall)}</td><td>${fixed(driftRecall)}</td><td>${fmt(m.fp, 0)}</td><td>${batches ? fmt(totals.serverMs[key] / batches, 2) : "–"}</td></tr>`;
+  };
+  $("compare").innerHTML = `<thead><tr><th>Model</th><th>Precision</th><th>Recall</th><th>Recall on gradual faults</th><th>False alarms</th><th>Avg server ms / batch</th></tr></thead>`
+    + `<tbody>${row("Point model (/predict-batch)", "point")}${row("Window model (/predict-stream)", "window")}</tbody>`
+    + `<tfoot><tr><td colspan="6" class="muted" style="text-align:left">${batches} micro-batches · ${totals.events.toLocaleString("en-US")} events · ${totals.anomalies.toLocaleString("en-US")} ground-truth anomalies (${totals.drift.toLocaleString("en-US")} gradual) · stream position ${stream.start.toLocaleString("en-US")} / 4,000</td></tr></tfoot>`;
 }
 
 function renderChart() {
   const w = 1000, h = 170, pad = 8, n = points.length;
   const x = (i) => n <= 1 ? pad : pad + (i * (w - 2 * pad)) / (n - 1);
   const y = (s) => h - pad - s * (h - 2 * pad);
-  const line = points.map((p, i) => `${x(i).toFixed(1)},${y(p.score).toFixed(1)}`).join(" ");
-  const dots = points.map((p, i) => p.flagged || p.truth
-    ? `<circle cx="${x(i).toFixed(1)}" cy="${y(p.score).toFixed(1)}" r="3.2" fill="${p.flagged && p.truth ? "#f43f5e" : p.flagged ? "#f59e0b" : "#a78bfa"}"><title>${esc(p.label)}</title></circle>` : "").join("");
-  $("chart").innerHTML = `<line x1="0" x2="${w}" y1="${y(threshold)}" y2="${y(threshold)}" stroke="#fff" stroke-dasharray="6 6" stroke-opacity=".5"/>`
-    + `<polyline fill="none" stroke="#38bdf8" stroke-width="1.4" points="${line}"/>${dots}`
-    + `<text x="${w - 6}" y="${y(threshold) - 6}" fill="#94a3b8" font-size="12" text-anchor="end">threshold ${threshold.toFixed(3)}</text>`;
+  const line = (key) => points.map((p, i) => `${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join(" ");
+  const color = (p) => p.pointHit && p.windowHit ? "#f43f5e" : p.windowHit ? "#22c55e" : p.pointHit ? "#38bdf8" : "#a78bfa";
+  const dots = points.map((p, i) => p.truth
+    ? `<circle cx="${x(i).toFixed(1)}" cy="${y(Math.max(p.point, p.window)).toFixed(1)}" r="3.2" fill="${color(p)}"><title>${esc(p.label)}</title></circle>` : "").join("");
+  $("chart").innerHTML = `<polyline fill="none" stroke="#38bdf8" stroke-opacity=".6" stroke-width="1.2" points="${line("point")}"/>`
+    + `<polyline fill="none" stroke="#22c55e" stroke-width="1.4" points="${line("window")}"/>${dots}`;
 }
 
+const badge = (flag) => flag ? '<span class="badge anomaly">anomaly</span>' : '<span class="badge normal">normal</span>';
+
 function renderRows() {
-  $("rows").innerHTML = recent.map(({ e, p, t }) => `<tr>
+  $("rows").innerHTML = recent.map(({ e, p, wp, t }) => `<tr>
     <td class="mono">${esc(String(e.event_timestamp).slice(11, 19))}</td><td class="mono">${esc(e.vehicle_id)}</td>
     <td>${fmt(e.speed, 1)}</td><td>${fmt(e.engine_rpm, 0)}</td><td>${fmt(e.engine_temperature, 1)}</td><td>${fmt(e.battery_voltage, 2)}</td>
-    <td>${fmt(e.acceleration, 2)}</td><td>${fmt(e.brake_pressure, 1)}</td><td class="mono">${p.anomaly_score.toFixed(3)}</td>
-    <td>${p.is_anomaly ? '<span class="badge anomaly">anomaly</span>' : '<span class="badge normal">normal</span>'}</td>
+    <td>${fmt(e.acceleration, 2)}</td><td class="mono">${p.anomaly_score.toFixed(3)}</td><td class="mono">${wp.anomaly_score.toFixed(3)}</td>
+    <td>${badge(p.is_anomaly)}</td><td>${badge(wp.is_anomaly)}</td>
     <td>${t.is_anomaly ? `<span class="badge anomaly">${esc(t.anomaly_type)}</span>` : '<span class="badge muted">normal</span>'}</td></tr>`).join("");
 }
 
-async function streamTick() {
-  if (!running) return;
+function tally(key, pred, t) {
+  const m = totals[key];
+  if (pred.is_anomaly && t.is_anomaly) { m.tp += 1; if (DRIFT_TYPES.has(t.anomaly_type)) m.driftTp += 1; }
+  else if (pred.is_anomaly) m.fp += 1;
+  else if (t.is_anomaly) m.fn += 1;
+}
+
+async function streamTick(generation) {
+  if (!running || generation !== streamGeneration) return;
   try {
-    const n = $("batch").value, rate = $("rate").value;
-    const { body: d } = await api(`/demo/events?n=${encodeURIComponent(n)}&anomaly_rate=${encodeURIComponent(rate)}`);
-    const { body: r, serverMs } = await api("/predict-batch", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ events: d.events }) });
+    const params = `n=${encodeURIComponent($("batch").value)}&anomaly_rate=${encodeURIComponent(stream.rate)}&drift_rate=${encodeURIComponent(stream.drift)}`;
+    const seedParam = stream.seed === null ? "" : `&seed=${stream.seed}`;
+    const { body: d } = await api(`/demo/events?start=${stream.start}&${params}${seedParam}`);
+    const post = (path, body) => api(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const [pr, wr] = await Promise.all([post("/predict-batch", { events: d.events }), post("/predict-stream", { events: d.events, state: stream.state })]);
+    if (generation !== streamGeneration) return;  // stopped or restarted while this batch was in flight
+    stream.seed = d.seed;
+    stream.state = wr.body.state; stream.start = d.next_start; windowThreshold = wr.body.threshold;
+    batches += 1; totals.serverMs.point += pr.serverMs || 0; totals.serverMs.window += wr.serverMs || 0;
     const truth = new Map(d.ground_truth.map((g) => [g.event_id, g]));
-    batches += 1; totals.serverMs += serverMs || 0;
-    r.predictions.forEach((p, i) => {
-      const t = truth.get(p.event_id), e = d.events[i];
-      totals.scored += 1; if (p.is_anomaly) totals.flagged += 1;
-      if (p.is_anomaly && t.is_anomaly) totals.tp += 1; else if (p.is_anomaly) totals.fp += 1; else if (t.is_anomaly) totals.fn += 1;
-      points.push({ score: p.anomaly_score, flagged: p.is_anomaly, truth: t.is_anomaly, label: `${e.vehicle_id} ${t.anomaly_type} score ${p.anomaly_score.toFixed(3)}` });
-      recent.unshift({ e, p, t });
+    d.events.forEach((e, i) => {
+      const p = pr.body.predictions[i], wp = wr.body.predictions[i], t = truth.get(e.event_id);
+      totals.events += 1;
+      if (t.is_anomaly) { totals.anomalies += 1; if (DRIFT_TYPES.has(t.anomaly_type)) totals.drift += 1; }
+      tally("point", p, t); tally("window", wp, t);
+      points.push({ point: p.anomaly_score, window: wp.anomaly_score, truth: t.is_anomaly, pointHit: p.is_anomaly, windowHit: wp.is_anomaly,
+        label: `${e.vehicle_id} ${t.anomaly_type}: point ${p.anomaly_score.toFixed(3)}, window ${wp.anomaly_score.toFixed(3)}` });
+      recent.unshift({ e, p, wp, t });
     });
     points = points.slice(-300); recent = recent.slice(0, 15);
     renderStreamStats(); renderChart(); renderRows();
     $("stream-err").textContent = "";
-    if (batches >= MAX_BATCHES) { stopStream(); $("stream-err").textContent = `Stopped automatically after ${MAX_BATCHES} batches.`; return; }
+    if (stream.start >= d.stream_length) { stopStream(); $("stream-err").textContent = "Stream finished (4,000 events). Press Start for a new fleet."; return; }
   } catch (e) { $("stream-err").textContent = e.message; }
-  if (running) setTimeout(streamTick, 1200);
+  if (running && generation === streamGeneration) streamTimer = setTimeout(() => streamTick(generation), 1200);
+}
+
+function setStreamControls(active) {
+  $("start").disabled = active; $("stop").disabled = !active;
+  // The fleet depends on these settings, so they are locked while a stream is running.
+  $("rate").disabled = active; $("drift").disabled = active;
 }
 
 function startStream() {
-  running = true; batches = 0; points = []; recent = [];
-  totals = { scored: 0, flagged: 0, tp: 0, fp: 0, fn: 0, serverMs: 0 };
-  $("start").disabled = true; $("stop").disabled = false; $("stream-err").textContent = "";
-  streamTick();
+  const rate = $("rate").value, drift = $("drift").value;
+  const finished = stream.start >= 4000;
+  if (finished || rate !== stream.rate || drift !== stream.drift || stream.seed === null) {
+    stream = { seed: null, start: 0, state: null, rate, drift };
+    batches = 0; points = []; recent = []; totals = emptyTotals();
+  }
+  clearTimeout(streamTimer);
+  streamGeneration += 1;
+  running = true;
+  setStreamControls(true); $("stream-err").textContent = "";
+  streamTick(streamGeneration);
 }
-function stopStream() { running = false; $("start").disabled = false; $("stop").disabled = true; }
+function stopStream() {
+  running = false;
+  streamGeneration += 1;  // results of a batch still in flight are discarded; Resume re-fetches it
+  clearTimeout(streamTimer);
+  setStreamControls(false);
+  $("start").textContent = stream.start > 0 && stream.start < 4000 ? "Resume stream" : "Start stream";
+}
 $("start").addEventListener("click", startStream);
 $("stop").addEventListener("click", stopStream);
 document.addEventListener("visibilitychange", () => { if (document.hidden && running) stopStream(); });
@@ -312,8 +364,15 @@ async function loadReports() {
   if (b) {
     const env = b.environment;
     $("bench-env").innerHTML = `Measured ${esc(b.measured_at)} on <strong>${esc(env.cpu)}</strong> (${esc(env.logical_cpus)} logical CPUs, ${esc(env.os)}, Python ${esc(env.libraries.python)}). That is a developer machine, <strong>not this server</strong>. ${fmt(b.settings.single_iterations, 0)} timed single-event calls per variant; batches of ${fmt(b.settings.batch_size, 0)}.`;
-    const rows = b.models.map((m) => `<tr><td>${esc(m.model_name)}</td><td>${fmt(m.single_event.baseline.mean_ms)}</td><td>${fmt(m.single_event.optimized.mean_ms)}</td><td><strong>${fmt(m.improvement.single_mean_latency_pct, 1)}%</strong></td><td>${fmt(m.batch.optimized_batch.throughput_per_s, 0)}</td></tr>`).join("");
-    $("bench").innerHTML = `<thead><tr><th>Model</th><th>Baseline ms</th><th>Optimized ms</th><th>Latency cut</th><th>Batch preds/s</th></tr></thead><tbody>${rows}</tbody>`;
+    const ms = (v) => v === undefined ? "–" : fmt(v, v < 1 ? 4 : 3);
+    const rows = b.models.map((m) => {
+      const onnx = m.single_event.onnx_runtime, edge = m.edge || {};
+      return `<tr><td>${esc(m.model_name)}</td><td>${ms(m.single_event.baseline.mean_ms)}</td><td>${ms(m.single_event.optimized.mean_ms)}</td><td>${ms(onnx && onnx.mean_ms)}</td>`
+        + `<td><strong>${fmt(onnx ? m.improvement.onnx_single_mean_latency_pct_vs_baseline : m.improvement.single_mean_latency_pct, 1)}%</strong></td>`
+        + `<td>${edge.onnx_size_bytes ? `${fmt(edge.joblib_size_bytes / 1024, 0)} → ${fmt(edge.onnx_size_bytes / 1024, 0)}` : "–"}</td></tr>`;
+    }).join("");
+    $("bench").innerHTML = `<thead><tr><th>Model</th><th>Baseline ms</th><th>Optimized native ms</th><th>ONNX Runtime ms</th><th>Latency cut</th><th>Model size KB</th></tr></thead><tbody>${rows}</tbody>`
+      + `<tfoot><tr><td colspan="6" class="muted" style="text-align:left">Mean single-event latency. Latency cut = baseline → fastest variant. Size: joblib → ONNX. Full tables (batch throughput, p95/p99, load time, parity) in reports/benchmark_results.md.</td></tr></tfoot>`;
   } else { $("bench-env").textContent = "No benchmark report is bundled with this deployment."; }
 
   const s = r.streaming;
@@ -323,7 +382,7 @@ async function loadReports() {
     const engineNote = engine === "local"
       ? "pandas micro-batch engine (this image has no Java, so the PySpark engine falls back to it; both apply the same validation rules)"
       : engine;
-    $("stream-run-note").innerHTML = `Ran when this deployment was built (${esc(s.generated_at)}) over synthetic JSON Lines files with injected malformed and duplicate events, using the ${esc(engineNote)}.`;
+    $("stream-run-note").innerHTML = `Ran when this deployment was built (${esc(s.generated_at)}) over synthetic JSON Lines files with injected malformed and duplicate events, using the ${esc(engineNote)}. Model: <code>${esc(s.run && s.run.model)}</code> (${esc(s.run && s.run.feature_set)} features, per-vehicle state carried across micro-batches).`;
     $("stream-run").innerHTML = [
       stat("Input events", fmt(s.input_rows, 0)), stat("Micro-batches", s.batches), stat("Invalid (quarantined)", fmt(s.invalid_rows, 0)),
       stat("Duplicates dropped", fmt(s.duplicates_dropped, 0)), stat("Anomalies flagged", fmt(s.anomalies_detected, 0)),

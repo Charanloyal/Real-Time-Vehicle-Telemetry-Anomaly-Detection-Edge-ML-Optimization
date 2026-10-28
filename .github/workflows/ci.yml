@@ -14,6 +14,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    name: Lint and type check (ruff, mypy)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+          pip install --no-deps -e .
+      - name: ruff check
+        run: ruff check src tests scripts
+      - name: ruff format --check
+        run: ruff format --check src tests scripts
+      - name: mypy --strict
+        run: mypy
+
   tests:
     name: Tests (Python 3.11, Java 17, PySpark)
     runs-on: ubuntu-24.04
@@ -60,10 +83,10 @@ jobs:
       - uses: actions/checkout@v7
       - name: Build image
         run: docker build -t vehicle-telemetry-anomaly-api:ci .
-      - name: Run container like Render (PORT=10000, 1 inference thread)
+      - name: Run container like Render (PORT=10000, ONNX Runtime, 1 inference thread)
         run: |
           docker run -d --name vtad -p 10000:10000 \
-            -e PORT=10000 -e VTAD_INFERENCE_THREADS=1 -e OMP_NUM_THREADS=1 \
+            -e PORT=10000 -e VTAD_RUNTIME=onnx -e VTAD_INFERENCE_THREADS=1 -e OMP_NUM_THREADS=1 \
             --memory=512m --cpus=0.5 \
             vehicle-telemetry-anomaly-api:ci
       - name: Smoke test

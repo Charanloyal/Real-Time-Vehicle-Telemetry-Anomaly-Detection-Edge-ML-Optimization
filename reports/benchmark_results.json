@@ -1,5 +1,5 @@
 {
-  "measured_at": "2026-10-27T11:51:29+00:00",
+  "measured_at": "2026-10-28T05:30:27+00:00",
   "environment": {
     "os": "Windows-11-10.0.26200-SP0",
     "machine": "AMD64",
@@ -12,7 +12,8 @@
       "numpy": "2.5.4",
       "pandas": "2.3.3",
       "scikit-learn": "1.7.2",
-      "xgboost": "3.4.1"
+      "xgboost": "3.4.1",
+      "onnxruntime": "1.31.1"
     },
     "in_container": false
   },
@@ -21,6 +22,8 @@
     "warmup_iterations": 100,
     "batch_size": 1000,
     "batch_iterations": 20,
+    "load_iterations": 5,
+    "onnx_runtime_threads": 1,
     "event_pool": 30000
   },
   "models": [
@@ -29,88 +32,125 @@
       "model_type": "RandomForestClassifier",
       "parity": {
         "events_checked": 500,
-        "max_abs_score_diff_single": 4.440892098500626e-16,
-        "max_abs_score_diff_batch": 4.440892098500626e-16,
-        "prediction_agreement": 1.0
+        "max_abs_score_diff_single": 2.220446049250313e-16,
+        "max_abs_score_diff_batch": 3.3306690738754696e-16,
+        "prediction_agreement": 1.0,
+        "onnx": {
+          "events_checked": 30000,
+          "max_abs_score_diff": 8.467737977468914e-07,
+          "decision_agreement": 1.0
+        }
       },
       "single_event": {
         "baseline": {
           "calls": 2000,
           "items_per_call": 1,
-          "mean_ms": 35.41464225000001,
-          "p50_ms": 36.497749999999996,
-          "p95_ms": 43.152925,
-          "p99_ms": 46.464983,
-          "min_ms": 19.4517,
-          "max_ms": 55.4552,
-          "throughput_per_s": 28.236908139316295
+          "mean_ms": 35.21631835,
+          "p50_ms": 36.15445,
+          "p95_ms": 42.304265,
+          "p99_ms": 47.288163,
+          "min_ms": 19.1698,
+          "max_ms": 92.7353,
+          "throughput_per_s": 28.395926855880436
         },
         "numpy_features": {
           "calls": 2000,
           "items_per_call": 1,
-          "mean_ms": 30.963273649999998,
-          "p50_ms": 32.01575,
-          "p95_ms": 37.32061,
-          "p99_ms": 40.431604,
-          "min_ms": 16.1387,
-          "max_ms": 53.8073,
-          "throughput_per_s": 32.296326651494105
+          "mean_ms": 30.3349431,
+          "p50_ms": 31.42225,
+          "p95_ms": 36.287265,
+          "p99_ms": 38.777998999999994,
+          "min_ms": 16.1197,
+          "max_ms": 180.1456,
+          "throughput_per_s": 32.965283524794216
         },
         "optimized": {
           "calls": 2000,
           "items_per_call": 1,
-          "mean_ms": 4.354545600000001,
-          "p50_ms": 3.9576000000000002,
-          "p95_ms": 7.794804999999999,
-          "p99_ms": 9.648579,
-          "min_ms": 1.846,
-          "max_ms": 12.6245,
-          "throughput_per_s": 229.64508627490315
+          "mean_ms": 3.8471182500000003,
+          "p50_ms": 3.74335,
+          "p95_ms": 6.3030800000000005,
+          "p99_ms": 8.367954999999998,
+          "min_ms": 1.7769,
+          "max_ms": 12.7377,
+          "throughput_per_s": 259.9348226428964
+        },
+        "onnx_runtime": {
+          "calls": 2000,
+          "items_per_call": 1,
+          "mean_ms": 0.052730400000000004,
+          "p50_ms": 0.041550000000000004,
+          "p95_ms": 0.113105,
+          "p99_ms": 0.19870799999999997,
+          "min_ms": 0.0208,
+          "max_ms": 0.4173,
+          "throughput_per_s": 18964.392456723253
         }
       },
       "batch": {
         "baseline_per_event_loop": {
           "calls": 3,
           "items_per_call": 1000,
-          "mean_ms": 34113.68456666666,
-          "p50_ms": 34067.759,
-          "p95_ms": 34384.37405,
-          "p99_ms": 34412.51761,
-          "min_ms": 33853.7412,
-          "max_ms": 34419.5535,
-          "throughput_per_s": 29.313749385404268
+          "mean_ms": 36025.152500000004,
+          "p50_ms": 35997.6112,
+          "p95_ms": 36242.686870000005,
+          "p99_ms": 36264.471374,
+          "min_ms": 35807.9288,
+          "max_ms": 36269.9175,
+          "throughput_per_s": 27.75838353494825
         },
         "baseline_vectorized": {
           "calls": 20,
           "items_per_call": 1000,
-          "mean_ms": 36.184524999999994,
-          "p50_ms": 36.0089,
-          "p95_ms": 38.60682500000001,
-          "p99_ms": 45.33776499999999,
-          "min_ms": 31.9763,
-          "max_ms": 47.0205,
-          "throughput_per_s": 27636.123453327084
+          "mean_ms": 36.996860000000005,
+          "p50_ms": 36.1098,
+          "p95_ms": 44.585945,
+          "p99_ms": 48.40942899999999,
+          "min_ms": 31.5188,
+          "max_ms": 49.3653,
+          "throughput_per_s": 27029.320866689763
         },
         "optimized_batch": {
           "calls": 20,
           "items_per_call": 1000,
-          "mean_ms": 33.30105999999999,
-          "p50_ms": 32.3224,
-          "p95_ms": 37.61027,
-          "p99_ms": 42.26709399999999,
-          "min_ms": 29.0962,
-          "max_ms": 43.4313,
-          "throughput_per_s": 30029.07414959164
+          "mean_ms": 35.61632000000001,
+          "p50_ms": 33.7889,
+          "p95_ms": 48.89194,
+          "p99_ms": 51.345828,
+          "min_ms": 30.4805,
+          "max_ms": 51.9593,
+          "throughput_per_s": 28077.016379008266
+        },
+        "onnx_runtime_batch": {
+          "calls": 20,
+          "items_per_call": 1000,
+          "mean_ms": 7.705094999999998,
+          "p50_ms": 7.5494,
+          "p95_ms": 10.325400000000002,
+          "p99_ms": 10.85132,
+          "min_ms": 4.157,
+          "max_ms": 10.9828,
+          "throughput_per_s": 129784.25314678148
         }
       },
       "improvement": {
-        "single_mean_latency_pct": 87.7041095904336,
-        "single_p50_latency_pct": 89.15659184470276,
-        "feature_extraction_only_mean_latency_pct": 12.569288625243724,
-        "batch_speedup_vs_per_event_loop": 1024.4023633682132,
-        "batch_speedup_vs_baseline_vectorized": 1.0865877842927523
+        "single_mean_latency_pct": 89.07575115670772,
+        "single_p50_latency_pct": 89.64622612154244,
+        "feature_extraction_only_mean_latency_pct": 13.861117455510511,
+        "batch_speedup_vs_per_event_loop": 1011.4787967987708,
+        "batch_speedup_vs_baseline_vectorized": 1.038761444191876,
+        "onnx_single_mean_latency_pct_vs_baseline": 99.85026714185187,
+        "onnx_single_mean_latency_pct_vs_optimized": 98.6293532828111,
+        "onnx_batch_speedup_vs_optimized_batch": 4.622437491036778
       },
-      "batch_size": 1000
+      "batch_size": 1000,
+      "edge": {
+        "joblib_size_bytes": 10870713,
+        "joblib_load_ms": 37.0586,
+        "onnx_size_bytes": 5252018,
+        "onnx_load_ms": 364.4751,
+        "size_reduction_pct": 51.68653610853309
+      }
     },
     {
       "model_name": "xgboost",
@@ -119,86 +159,123 @@
         "events_checked": 500,
         "max_abs_score_diff_single": 0.0,
         "max_abs_score_diff_batch": 0.0,
-        "prediction_agreement": 1.0
+        "prediction_agreement": 1.0,
+        "onnx": {
+          "events_checked": 30000,
+          "max_abs_score_diff": 8.940696716308594e-08,
+          "decision_agreement": 1.0
+        }
       },
       "single_event": {
         "baseline": {
           "calls": 2000,
           "items_per_call": 1,
-          "mean_ms": 2.8750559,
-          "p50_ms": 2.7972,
-          "p95_ms": 3.66607,
-          "p99_ms": 4.157828,
-          "min_ms": 1.9903,
-          "max_ms": 6.6712,
-          "throughput_per_s": 347.8193241390541
+          "mean_ms": 2.9906508,
+          "p50_ms": 2.8756500000000003,
+          "p95_ms": 4.01922,
+          "p99_ms": 5.210985,
+          "min_ms": 1.9969,
+          "max_ms": 9.2126,
+          "throughput_per_s": 334.37538076996486
         },
         "numpy_features": {
           "calls": 2000,
           "items_per_call": 1,
-          "mean_ms": 0.3522158,
-          "p50_ms": 0.3114,
-          "p95_ms": 0.5272999999999999,
-          "p99_ms": 0.8623109999999999,
-          "min_ms": 0.2615,
-          "max_ms": 2.265,
-          "throughput_per_s": 2839.1684870468616
+          "mean_ms": 0.401625,
+          "p50_ms": 0.3136,
+          "p95_ms": 0.778565,
+          "p99_ms": 1.937252,
+          "min_ms": 0.2668,
+          "max_ms": 4.6773,
+          "throughput_per_s": 2489.8848428260194
         },
         "optimized": {
           "calls": 2000,
           "items_per_call": 1,
-          "mean_ms": 0.21796285,
-          "p50_ms": 0.1813,
-          "p95_ms": 0.371125,
-          "p99_ms": 0.566753,
-          "min_ms": 0.1446,
-          "max_ms": 1.1085,
-          "throughput_per_s": 4587.937806832678
+          "mean_ms": 0.2669359,
+          "p50_ms": 0.19974999999999998,
+          "p95_ms": 0.492715,
+          "p99_ms": 1.7095659999999997,
+          "min_ms": 0.1479,
+          "max_ms": 5.05,
+          "throughput_per_s": 3746.217724929468
+        },
+        "onnx_runtime": {
+          "calls": 2000,
+          "items_per_call": 1,
+          "mean_ms": 0.02676175,
+          "p50_ms": 0.0271,
+          "p95_ms": 0.036605,
+          "p99_ms": 0.067409,
+          "min_ms": 0.0152,
+          "max_ms": 0.2419,
+          "throughput_per_s": 37366.76413164311
         }
       },
       "batch": {
         "baseline_per_event_loop": {
           "calls": 3,
           "items_per_call": 1000,
-          "mean_ms": 2879.5272,
-          "p50_ms": 2885.2188,
-          "p95_ms": 2915.11455,
-          "p99_ms": 2917.77195,
-          "min_ms": 2834.9265,
-          "max_ms": 2918.4363,
-          "throughput_per_s": 347.27923389645355
+          "mean_ms": 2982.7636333333335,
+          "p50_ms": 2979.1994,
+          "p95_ms": 2999.36498,
+          "p99_ms": 3001.157476,
+          "min_ms": 2967.4859,
+          "max_ms": 3001.6056,
+          "throughput_per_s": 335.2595521900165
         },
         "baseline_vectorized": {
           "calls": 20,
           "items_per_call": 1000,
-          "mean_ms": 3.518285,
-          "p50_ms": 3.29755,
-          "p95_ms": 4.874160000000001,
-          "p99_ms": 5.0772319999999995,
-          "min_ms": 2.6436,
-          "max_ms": 5.128,
-          "throughput_per_s": 284229.3901716319
+          "mean_ms": 4.086264999999999,
+          "p50_ms": 3.9988,
+          "p95_ms": 5.45474,
+          "p99_ms": 5.596708,
+          "min_ms": 2.7623,
+          "max_ms": 5.6322,
+          "throughput_per_s": 244722.25859066902
         },
         "optimized_batch": {
           "calls": 20,
           "items_per_call": 1000,
-          "mean_ms": 1.3696400000000002,
-          "p50_ms": 1.2758500000000002,
-          "p95_ms": 2.0386900000000003,
-          "p99_ms": 2.091738,
-          "min_ms": 1.1089,
-          "max_ms": 2.105,
-          "throughput_per_s": 730118.8633509534
+          "mean_ms": 1.66171,
+          "p50_ms": 1.55435,
+          "p95_ms": 2.8231150000000005,
+          "p99_ms": 3.3067029999999993,
+          "min_ms": 1.1548,
+          "max_ms": 3.4276,
+          "throughput_per_s": 601789.7226351168
+        },
+        "onnx_runtime_batch": {
+          "calls": 20,
+          "items_per_call": 1000,
+          "mean_ms": 2.27966,
+          "p50_ms": 2.23,
+          "p95_ms": 2.604835,
+          "p99_ms": 2.7847269999999997,
+          "min_ms": 1.9427,
+          "max_ms": 2.8297,
+          "throughput_per_s": 438661.90572278324
         }
       },
       "improvement": {
-        "single_mean_latency_pct": 92.41883088255778,
-        "single_p50_latency_pct": 93.51851851851852,
-        "feature_extraction_only_mean_latency_pct": 87.74925384929037,
-        "batch_speedup_vs_per_event_loop": 2102.3971262521536,
-        "batch_speedup_vs_baseline_vectorized": 2.5687662451447095
+        "single_mean_latency_pct": 91.07432067963266,
+        "single_p50_latency_pct": 93.0537443708379,
+        "feature_extraction_only_mean_latency_pct": 86.57064876982629,
+        "batch_speedup_vs_per_event_loop": 1794.99649958978,
+        "batch_speedup_vs_baseline_vectorized": 2.459072280963585,
+        "onnx_single_mean_latency_pct_vs_baseline": 99.10515296536794,
+        "onnx_single_mean_latency_pct_vs_optimized": 89.97446577998687,
+        "onnx_batch_speedup_vs_optimized_batch": 0.7289288753586062
       },
-      "batch_size": 1000
+      "batch_size": 1000,
+      "edge": {
+        "joblib_size_bytes": 361713,
+        "joblib_load_ms": 2.8934,
+        "onnx_size_bytes": 192818,
+        "onnx_load_ms": 3.7682,
+        "size_reduction_pct": 46.693096460453454
+      }
     }
   ]
 }

@@ -1,4 +1,4 @@
-"""Inference latency benchmark: reference path vs optimized path.
+"""Inference latency benchmark: reference path vs optimized paths, plus edge metrics.
 
 Reference ("baseline") path, i.e. the straightforward implementation before optimization:
     pandas.DataFrame([event]) -> fitted sklearn Pipeline.transform -> model.predict_proba
@@ -6,8 +6,11 @@ Reference ("baseline") path, i.e. the straightforward implementation before opti
 Variants measured:
     numpy_features : optimized NumPy feature extraction, unchanged model call (isolates feature
                      extraction cost)
-    optimized      : NumPy feature extraction + low-overhead model call (AnomalyPredictor)
+    optimized      : NumPy feature extraction + low-overhead native model call (AnomalyPredictor)
+    onnx_runtime   : NumPy feature extraction + the model exported to ONNX, run by ONNX Runtime
+                     with one intra-op thread (edge-style deployment)
 
+Edge metrics per model: artifact size (joblib vs ONNX) and median cold load time.
 All variants reuse the same loaded objects, run on identical events, and are checked for score
 parity. Results are written to reports/benchmark_results.{json,md}.
 """
@@ -22,10 +25,12 @@ import os
 import platform
 import sys
 import time
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, cast
 
+import joblib
 import numpy as np
 import pandas as pd
 
@@ -60,12 +65,17 @@ def cpu_name() -> str:
 
 def total_memory_gb() -> float | None:
     if sys.platform == "win32":
+
         class MemoryStatus(ctypes.Structure):
             _fields_ = [
-                ("dwLength", ctypes.c_ulong), ("dwMemoryLoad", ctypes.c_ulong),
-                ("ullTotalPhys", ctypes.c_ulonglong), ("ullAvailPhys", ctypes.c_ulonglong),
-                ("ullTotalPageFile", ctypes.c_ulonglong), ("ullAvailPageFile", ctypes.c_ulonglong),
-                ("ullTotalVirtual", ctypes.c_ulonglong), ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
                 ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
             ]
 
@@ -83,6 +93,13 @@ def total_memory_gb() -> float | None:
 
 
 def environment_details() -> dict[str, Any]:
+    libraries = library_versions()
+    try:
+        import onnxruntime
+
+        libraries["onnxruntime"] = onnxruntime.__version__
+    except ImportError:
+        libraries["onnxruntime"] = "not installed"
     return {
         "os": platform.platform(),
         "machine": platform.machine(),
@@ -90,7 +107,7 @@ def environment_details() -> dict[str, Any]:
         "logical_cpus": os.cpu_count(),
         "total_memory_gb": total_memory_gb(),
         "python_implementation": platform.python_implementation(),
-        "libraries": library_versions(),
+        "libraries": libraries,
         "in_container": Path("/.dockerenv").exists(),
     }
 
@@ -99,14 +116,14 @@ def latency_stats(durations_ns: np.ndarray, items_per_call: int = 1) -> dict[str
     ms = durations_ns / 1e6
     mean_ms = float(ms.mean())
     return {
-        "calls": int(len(ms)),
+        "calls": len(ms),
         "items_per_call": items_per_call,
         "mean_ms": mean_ms,
         "p50_ms": float(np.percentile(ms, 50)),
         "p95_ms": float(np.percentile(ms, 95)),
         "p99_ms": float(np.percentile(ms, 99)),
-        "min_ms": float(ms.min()),
-        "max_ms": float(ms.max()),
+        "min_ms": float(np.min(ms)),
+        "max_ms": float(np.max(ms)),
         "throughput_per_s": float(items_per_call * 1000.0 / mean_ms) if mean_ms > 0 else None,
     }
 
@@ -138,11 +155,14 @@ def load_benchmark_events(config: AppConfig) -> list[dict[str, Any]]:
     path = config.paths.processed_dir / TEST_SET_FILE
     if not path.is_file():
         raise FileNotFoundError(f"Test split not found at {path}. Train a model first.")
-    return pd.read_parquet(path, columns=list(REQUIRED_FIELDS)).to_dict("records")
+    return cast(list[dict[str, Any]], pd.read_parquet(path, columns=list(REQUIRED_FIELDS)).to_dict("records"))
 
 
 def benchmark_model(
-    predictor: AnomalyPredictor, events: list[dict[str, Any]], config: AppConfig
+    predictor: AnomalyPredictor,
+    events: list[dict[str, Any]],
+    config: AppConfig,
+    onnx_predictor: AnomalyPredictor | None = None,
 ) -> dict[str, Any]:
     bench = config.benchmark
     preprocessor, model = predictor.preprocessor, predictor.model
@@ -157,11 +177,24 @@ def benchmark_model(
     def optimized_one(event: Mapping[str, Any]) -> float:
         return predictor.predict_one(event).anomaly_score
 
+    single_variants: list[tuple[str, Callable[[Any], Any]]] = [
+        ("baseline", baseline_one),
+        ("numpy_features", numpy_features_one),
+        ("optimized", optimized_one),
+    ]
+    if onnx_predictor is not None:
+        onnx = onnx_predictor
+
+        def onnx_one(event: Mapping[str, Any]) -> float:
+            return onnx.predict_one(event).anomaly_score
+
+        single_variants.append(("onnx_runtime", onnx_one))
+
     parity_events = events[: min(500, len(events))]
     baseline_scores = np.array([baseline_one(e) for e in parity_events])
     optimized_scores = np.array([optimized_one(e) for e in parity_events])
     batch_scores = np.array([p.anomaly_score for p in predictor.predict_records(parity_events)])
-    parity = {
+    parity: dict[str, Any] = {
         "events_checked": len(parity_events),
         "max_abs_score_diff_single": float(np.max(np.abs(baseline_scores - optimized_scores))),
         "max_abs_score_diff_batch": float(np.max(np.abs(baseline_scores - batch_scores))),
@@ -169,49 +202,110 @@ def benchmark_model(
             np.mean((baseline_scores >= predictor.threshold) == (optimized_scores >= predictor.threshold))
         ),
     }
+    if onnx_predictor is not None:
+        onnx_scores = np.array([p.anomaly_score for p in onnx_predictor.predict_records(events)])
+        native_scores = np.array([p.anomaly_score for p in predictor.predict_records(events)])
+        parity["onnx"] = {
+            "events_checked": len(events),
+            "max_abs_score_diff": float(np.max(np.abs(onnx_scores - native_scores))),
+            "decision_agreement": float(
+                np.mean((onnx_scores >= predictor.threshold) == (native_scores >= predictor.threshold))
+            ),
+        }
 
     single: dict[str, Any] = {}
-    for name, fn in (("baseline", baseline_one), ("numpy_features", numpy_features_one), ("optimized", optimized_one)):
+    for name, fn in single_variants:
         durations = _time_calls(fn, events, bench.single_iterations, bench.warmup_iterations)
         single[name] = latency_stats(durations)
-        logger.info("Single-event benchmark", extra={"model": predictor.model_name, "variant": name,
-                                                     "p50_ms": round(single[name]["p50_ms"], 4)})
+        logger.info(
+            "Single-event benchmark",
+            extra={"model": predictor.model_name, "variant": name, "p50_ms": round(single[name]["p50_ms"], 4)},
+        )
 
     batch_size = min(bench.batch_size, len(events))
     batches = [events[i : i + batch_size] for i in range(0, len(events) - batch_size + 1, batch_size)] or [events]
     loop_iterations = min(bench.batch_iterations, MAX_BASELINE_LOOP_ITERATIONS)
     batch_variants: list[tuple[str, Callable[[Any], Any], int]] = [
         ("baseline_per_event_loop", lambda b: [baseline_one(e) for e in b], loop_iterations),
-        ("baseline_vectorized", lambda b: model.predict_proba(preprocessor.transform(pd.DataFrame(b)))[:, 1],
-         bench.batch_iterations),
+        (
+            "baseline_vectorized",
+            lambda b: model.predict_proba(preprocessor.transform(pd.DataFrame(b)))[:, 1],
+            bench.batch_iterations,
+        ),
         ("optimized_batch", predictor.predict_records, bench.batch_iterations),
     ]
+    if onnx_predictor is not None:
+        batch_variants.append(("onnx_runtime_batch", onnx_predictor.predict_records, bench.batch_iterations))
     batch: dict[str, Any] = {}
     for name, fn, iterations in batch_variants:
         durations = _time_calls(fn, batches, iterations, warmup=1)
         batch[name] = latency_stats(durations, items_per_call=batch_size)
-        logger.info("Batch benchmark", extra={"model": predictor.model_name, "variant": name,
-                                              "throughput_per_s": round(batch[name]["throughput_per_s"], 1)})
+        logger.info(
+            "Batch benchmark",
+            extra={
+                "model": predictor.model_name,
+                "variant": name,
+                "throughput_per_s": round(batch[name]["throughput_per_s"], 1),
+            },
+        )
 
+    improvement: dict[str, Any] = {
+        "single_mean_latency_pct": improvement_pct(single["baseline"]["mean_ms"], single["optimized"]["mean_ms"]),
+        "single_p50_latency_pct": improvement_pct(single["baseline"]["p50_ms"], single["optimized"]["p50_ms"]),
+        "feature_extraction_only_mean_latency_pct": improvement_pct(
+            single["baseline"]["mean_ms"], single["numpy_features"]["mean_ms"]
+        ),
+        "batch_speedup_vs_per_event_loop": batch["optimized_batch"]["throughput_per_s"]
+        / batch["baseline_per_event_loop"]["throughput_per_s"],
+        "batch_speedup_vs_baseline_vectorized": batch["optimized_batch"]["throughput_per_s"]
+        / batch["baseline_vectorized"]["throughput_per_s"],
+    }
+    if onnx_predictor is not None:
+        improvement["onnx_single_mean_latency_pct_vs_baseline"] = improvement_pct(
+            single["baseline"]["mean_ms"], single["onnx_runtime"]["mean_ms"]
+        )
+        improvement["onnx_single_mean_latency_pct_vs_optimized"] = improvement_pct(
+            single["optimized"]["mean_ms"], single["onnx_runtime"]["mean_ms"]
+        )
+        improvement["onnx_batch_speedup_vs_optimized_batch"] = (
+            batch["onnx_runtime_batch"]["throughput_per_s"] / batch["optimized_batch"]["throughput_per_s"]
+        )
     return {
         "model_name": predictor.model_name,
         "model_type": type(model).__name__,
         "parity": parity,
         "single_event": single,
         "batch": batch,
-        "improvement": {
-            "single_mean_latency_pct": improvement_pct(single["baseline"]["mean_ms"], single["optimized"]["mean_ms"]),
-            "single_p50_latency_pct": improvement_pct(single["baseline"]["p50_ms"], single["optimized"]["p50_ms"]),
-            "feature_extraction_only_mean_latency_pct": improvement_pct(
-                single["baseline"]["mean_ms"], single["numpy_features"]["mean_ms"]
-            ),
-            "batch_speedup_vs_per_event_loop": batch["optimized_batch"]["throughput_per_s"]
-            / batch["baseline_per_event_loop"]["throughput_per_s"],
-            "batch_speedup_vs_baseline_vectorized": batch["optimized_batch"]["throughput_per_s"]
-            / batch["baseline_vectorized"]["throughput_per_s"],
-        },
+        "improvement": improvement,
         "batch_size": batch_size,
     }
+
+
+def edge_metrics(model_dir: Path, name: str, entry: Mapping[str, Any], iterations: int) -> dict[str, Any]:
+    """Artifact size and cold load time: joblib (native) vs ONNX Runtime session."""
+    joblib_path = model_dir / entry["file"]
+    result: dict[str, Any] = {"joblib_size_bytes": joblib_path.stat().st_size}
+
+    def median_ms(fn: Callable[[], Any]) -> float:
+        times = []
+        for _ in range(max(1, iterations)):
+            gc.collect()
+            start = time.perf_counter_ns()
+            fn()
+            times.append((time.perf_counter_ns() - start) / 1e6)
+        return float(np.median(times))
+
+    result["joblib_load_ms"] = median_ms(lambda: joblib.load(joblib_path))
+    onnx_meta = entry.get("onnx") or {}
+    if onnx_meta.get("file") and (model_dir / onnx_meta["file"]).is_file():
+        from vehicle_anomaly.onnx_export import OnnxScorer
+
+        onnx_path = model_dir / onnx_meta["file"]
+        result["onnx_size_bytes"] = onnx_path.stat().st_size
+        result["onnx_load_ms"] = median_ms(lambda: OnnxScorer(onnx_path))
+        result["size_reduction_pct"] = improvement_pct(result["joblib_size_bytes"], result["onnx_size_bytes"])
+    logger.info("Edge metrics", extra={"model": name, **result})
+    return result
 
 
 def _render_markdown(report: dict[str, Any]) -> str:
@@ -224,22 +318,33 @@ def _render_markdown(report: dict[str, Any]) -> str:
         "from `time.perf_counter_ns` in a single Python process; other workloads on the machine were not "
         "controlled, so expect run-to-run variation.",
         "",
-        markdown_table(["Property", "Value"], [
-            ["OS", env["os"]], ["CPU", env["cpu"]], ["Logical CPUs", env["logical_cpus"]],
-            ["RAM (GB)", env["total_memory_gb"]], ["Python", env["libraries"]["python"]],
-            ["scikit-learn", env["libraries"]["scikit-learn"]], ["xgboost", env["libraries"]["xgboost"]],
-            ["numpy / pandas", f"{env['libraries']['numpy']} / {env['libraries']['pandas']}"],
-            ["In container", env["in_container"]],
-        ]),
+        markdown_table(
+            ["Property", "Value"],
+            [
+                ["OS", env["os"]],
+                ["CPU", env["cpu"]],
+                ["Logical CPUs", env["logical_cpus"]],
+                ["RAM (GB)", env["total_memory_gb"]],
+                ["Python", env["libraries"]["python"]],
+                ["scikit-learn", env["libraries"]["scikit-learn"]],
+                ["xgboost", env["libraries"]["xgboost"]],
+                ["onnxruntime", env["libraries"].get("onnxruntime", "n/a")],
+                ["numpy / pandas", f"{env['libraries']['numpy']} / {env['libraries']['pandas']}"],
+                ["In container", env["in_container"]],
+            ],
+        ),
         "",
         f"Settings: {cfg['single_iterations']:,} timed single-event calls per variant after "
         f"{cfg['warmup_iterations']} warm-up calls; batch size {cfg['batch_size']:,} with "
         f"{cfg['batch_iterations']} timed batches ({MAX_BASELINE_LOOP_ITERATIONS} for the per-event loop). "
-        f"Events come from the held-out test split ({cfg['event_pool']:,} events).",
+        f"ONNX Runtime uses {cfg.get('onnx_runtime_threads', 1)} intra-op thread. Load times are the median of "
+        f"{cfg.get('load_iterations', 'n/a')} cold loads. Events come from the held-out test split "
+        f"({cfg['event_pool']:,} events).",
         "",
     ]
     for result in report["models"]:
         s, b, imp, par = result["single_event"], result["batch"], result["improvement"], result["parity"]
+        edge = result.get("edge") or {}
         lines += [
             f"## {result['model_name']} ({result['model_type']})",
             "",
@@ -254,6 +359,13 @@ def _render_markdown(report: dict[str, Any]) -> str:
             f"- p50 latency improvement: **{imp['single_p50_latency_pct']:.1f}%**",
             f"- Feature extraction change alone (baseline -> numpy_features): "
             f"**{imp['feature_extraction_only_mean_latency_pct']:.1f}%** mean latency",
+        ]
+        if "onnx_single_mean_latency_pct_vs_baseline" in imp:
+            lines += [
+                f"- ONNX Runtime vs baseline: **{imp['onnx_single_mean_latency_pct_vs_baseline']:.1f}%** lower mean "
+                f"latency; vs optimized native: **{imp['onnx_single_mean_latency_pct_vs_optimized']:.1f}%** lower",
+            ]
+        lines += [
             "",
             f"Batch scoring ({result['batch_size']:,} events per call):",
             "",
@@ -262,25 +374,65 @@ def _render_markdown(report: dict[str, Any]) -> str:
                 [[n, v["mean_ms"], v["throughput_per_s"], v["calls"]] for n, v in b.items()],
             ),
             "",
-            f"- Optimized batch vs per-event baseline loop: **{imp['batch_speedup_vs_per_event_loop']:.1f}x** throughput",
-            f"- Optimized batch vs vectorized baseline: **{imp['batch_speedup_vs_baseline_vectorized']:.2f}x** throughput",
-            f"- Score parity on {par['events_checked']} events: max |diff| = {par['max_abs_score_diff_single']:.2e} "
-            f"(single), {par['max_abs_score_diff_batch']:.2e} (batch); decision agreement "
-            f"{par['prediction_agreement']:.2%}",
-            "",
+            f"- Optimized batch vs per-event baseline loop: "
+            f"**{imp['batch_speedup_vs_per_event_loop']:.1f}x** throughput",
+            f"- Optimized batch vs vectorized baseline: "
+            f"**{imp['batch_speedup_vs_baseline_vectorized']:.2f}x** throughput",
         ]
+        if "onnx_batch_speedup_vs_optimized_batch" in imp:
+            lines.append(
+                f"- ONNX Runtime batch vs optimized native batch: "
+                f"**{imp['onnx_batch_speedup_vs_optimized_batch']:.2f}x** throughput"
+            )
+        lines.append(
+            f"- Native score parity on {par['events_checked']} events: max |diff| = "
+            f"{par['max_abs_score_diff_single']:.2e} (single), {par['max_abs_score_diff_batch']:.2e} (batch); "
+            f"decision agreement {par['prediction_agreement']:.2%}"
+        )
+        if "onnx" in par:
+            lines.append(
+                f"- ONNX parity on {par['onnx']['events_checked']:,} events: max |diff| = "
+                f"{par['onnx']['max_abs_score_diff']:.2e}; decision agreement {par['onnx']['decision_agreement']:.4%}"
+            )
+        if edge:
+            lines += [
+                "",
+                "Edge metrics:",
+                "",
+                markdown_table(
+                    ["Artifact", "Size (KB)", "Cold load ms (median)"],
+                    [["joblib (native)", edge["joblib_size_bytes"] / 1024, edge["joblib_load_ms"]]]
+                    + (
+                        [["ONNX (onnxruntime)", edge["onnx_size_bytes"] / 1024, edge["onnx_load_ms"]]]
+                        if "onnx_size_bytes" in edge
+                        else []
+                    ),
+                ),
+            ]
+        lines.append("")
     lines.append("![Benchmark](figures/benchmark_latency.png)")
     return "\n".join(lines) + "\n"
 
 
 def run_benchmark(config: AppConfig, model_names: Sequence[str] | None = None) -> dict[str, Any]:
     metadata = load_metadata(config.paths.model_dir)
-    names = list(model_names or ([config.benchmark.model] if config.benchmark.model else metadata["models"]))
+    point_models = [
+        name
+        for name, entry in metadata["models"].items()
+        if entry.get("feature_set", "point") == "point" and entry.get("supervised", True)
+    ]
+    names = list(model_names or ([config.benchmark.model] if config.benchmark.model else point_models))
     events = load_benchmark_events(config)
     results = []
     for name in names:
         predictor = AnomalyPredictor.load(config.paths.model_dir, name)
-        results.append(benchmark_model(predictor, events, config))
+        entry = metadata["models"][name]
+        onnx_predictor = None
+        if (entry.get("onnx") or {}).get("file"):
+            onnx_predictor = AnomalyPredictor.load(config.paths.model_dir, name, runtime="onnx")
+        result = benchmark_model(predictor, events, config, onnx_predictor)
+        result["edge"] = edge_metrics(config.paths.model_dir, name, entry, config.benchmark.load_iterations)
+        results.append(result)
 
     report = {
         "measured_at": utc_now_iso(),
@@ -290,6 +442,8 @@ def run_benchmark(config: AppConfig, model_names: Sequence[str] | None = None) -
             "warmup_iterations": config.benchmark.warmup_iterations,
             "batch_size": config.benchmark.batch_size,
             "batch_iterations": config.benchmark.batch_iterations,
+            "load_iterations": config.benchmark.load_iterations,
+            "onnx_runtime_threads": 1,
             "event_pool": len(events),
         },
         "models": results,
@@ -340,12 +494,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     report = run_benchmark(config, args.model)
     for result in report["models"]:
         imp = result["improvement"]
-        print(
+        line = (
             f"{result['model_name']}: baseline mean {result['single_event']['baseline']['mean_ms']:.3f} ms -> "
             f"optimized {result['single_event']['optimized']['mean_ms']:.3f} ms "
-            f"({imp['single_mean_latency_pct']:.1f}% lower); batch throughput "
-            f"{result['batch']['optimized_batch']['throughput_per_s']:,.0f} predictions/s"
+            f"({imp['single_mean_latency_pct']:.1f}% lower)"
         )
+        if "onnx_runtime" in result["single_event"]:
+            line += (
+                f" -> ONNX Runtime {result['single_event']['onnx_runtime']['mean_ms']:.4f} ms "
+                f"({imp['onnx_single_mean_latency_pct_vs_baseline']:.1f}% lower than baseline)"
+            )
+        print(line)
     return 0
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import platform
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +43,7 @@ def library_versions() -> dict[str, str]:
 
 
 def utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def save_preprocessor(model_dir: Path, preprocessor: Any) -> Path:
@@ -73,7 +73,8 @@ def load_metadata(model_dir: Path) -> dict[str, Any]:
         raise ModelArtifactsError(
             f"Model metadata not found at {path}. Train a model first: python scripts/train_model.py"
         )
-    return json.loads(path.read_text(encoding="utf-8"))
+    metadata: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return metadata
 
 
 def load_preprocessor(model_dir: Path) -> Any:

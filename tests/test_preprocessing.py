@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import timezone
+from datetime import UTC
 
 import numpy as np
 import pandas as pd
@@ -104,7 +104,7 @@ def test_validate_record_returns_typed_values() -> None:
     assert reason is None and typed is not None
     assert typed["speed"] == 50.5
     assert typed["event_id"] == "123"
-    assert typed["event_timestamp"].tzinfo == timezone.utc
+    assert typed["event_timestamp"].tzinfo == UTC
 
 
 def test_validate_lines_handles_blank_and_corrupt_lines() -> None:

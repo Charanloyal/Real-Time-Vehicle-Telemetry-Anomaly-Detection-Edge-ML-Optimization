@@ -13,6 +13,8 @@ CONFIG_ENV_VAR = "VTAD_CONFIG"
 MODEL_DIR_ENV_VAR = "VTAD_MODEL_DIR"
 LOG_LEVEL_ENV_VAR = "LOG_LEVEL"
 INFERENCE_THREADS_ENV_VAR = "VTAD_INFERENCE_THREADS"
+RUNTIME_ENV_VAR = "VTAD_RUNTIME"
+RUNTIMES = ("native", "onnx")
 DEFAULT_CONFIG_RELATIVE = Path("configs") / "config.yaml"
 
 
@@ -42,6 +44,8 @@ class DataGenerationConfig:
     events_per_vehicle: int = 2000
     anomaly_rate: float = 0.05
     hard_braking_rate: float = 0.004
+    drift_episodes_per_1000_events: float = 0.3
+    warm_start_rate: float = 0.5
     event_interval_seconds: float = 1.0
     start_time: str = "2026-01-01T00:00:00+00:00"
     base_latitude: float = 40.0
@@ -54,6 +58,7 @@ class StreamingDataConfig:
     num_files: int = 20
     events_per_file: int = 5000
     anomaly_rate: float = 0.05
+    drift_episodes_per_1000_events: float = 0.3
     malformed_rate: float = 0.01
     duplicate_rate: float = 0.005
     seed_offset: int = 1000
@@ -67,6 +72,7 @@ class TrainingConfig:
     selection_metric: str = "average_precision"
     random_forest: dict[str, Any] = field(default_factory=dict)
     xgboost: dict[str, Any] = field(default_factory=dict)
+    isolation_forest: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -76,11 +82,13 @@ class BenchmarkConfig:
     warmup_iterations: int = 100
     batch_size: int = 1000
     batch_iterations: int = 20
+    load_iterations: int = 5
 
 
 @dataclass(frozen=True)
 class StreamingConfig:
     engine: str = "auto"
+    feature_set: str = "window"
     trigger: str = "available_now"
     processing_interval_seconds: int = 5
     max_runtime_seconds: int | None = None
@@ -94,6 +102,7 @@ class StreamingConfig:
 class ApiConfig:
     max_batch_size: int = 1000
     default_port: int = 8000
+    runtime: str = "native"
     inference_threads: int | None = None
 
 
@@ -163,17 +172,13 @@ def load_config(path: str | Path | None = None) -> AppConfig:
     """Load configuration. Relative paths resolve against the folder containing ``configs/``."""
     config_path = Path(path).expanduser().resolve() if path else default_config_path()
     if not config_path.is_file():
-        raise ConfigError(
-            f"Config file not found: {config_path}. Run from the project root or set {CONFIG_ENV_VAR}."
-        )
+        raise ConfigError(f"Config file not found: {config_path}. Run from the project root or set {CONFIG_ENV_VAR}.")
     with config_path.open("r", encoding="utf-8") as handle:
         raw = yaml.safe_load(handle) or {}
     if not isinstance(raw, dict):
         raise ConfigError(f"Config file {config_path} must contain a mapping")
 
-    project_root = (
-        config_path.parent.parent if config_path.parent.name == "configs" else config_path.parent
-    )
+    project_root = config_path.parent.parent if config_path.parent.name == "configs" else config_path.parent
     logging_cfg = _build_section(LoggingConfig, raw.get("logging"), "logging")
     level_override = os.environ.get(LOG_LEVEL_ENV_VAR)
     if level_override:
@@ -185,6 +190,9 @@ def load_config(path: str | Path | None = None) -> AppConfig:
             api_cfg = replace(api_cfg, inference_threads=int(threads_override))
         except ValueError as exc:
             raise ConfigError(f"{INFERENCE_THREADS_ENV_VAR} must be an integer") from exc
+    runtime_override = os.environ.get(RUNTIME_ENV_VAR)
+    if runtime_override:
+        api_cfg = replace(api_cfg, runtime=runtime_override.strip().lower())
 
     config = AppConfig(
         project_root=project_root,
@@ -224,3 +232,15 @@ def _validate(config: AppConfig) -> None:
         raise ConfigError("api.max_batch_size must be >= 1")
     if config.api.inference_threads is not None and config.api.inference_threads < 1:
         raise ConfigError("api.inference_threads must be >= 1 or null")
+    if config.api.runtime not in RUNTIMES:
+        raise ConfigError(f"api.runtime must be one of: {', '.join(RUNTIMES)}")
+    if config.streaming.feature_set not in {"point", "window"}:
+        raise ConfigError("streaming.feature_set must be point or window")
+    for name, rate in {
+        "data_generation.drift_episodes_per_1000_events": config.data_generation.drift_episodes_per_1000_events,
+        "streaming_data.drift_episodes_per_1000_events": config.streaming_data.drift_episodes_per_1000_events,
+    }.items():
+        if rate < 0:
+            raise ConfigError(f"{name} must be >= 0")
+    if not 0 <= config.data_generation.warm_start_rate <= 1:
+        raise ConfigError("data_generation.warm_start_rate must be in [0, 1]")

@@ -14,9 +14,10 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Iterable
+from datetime import UTC, datetime
+from typing import Any
 
 import pandas as pd
 
@@ -60,7 +61,7 @@ def _to_timestamp(value: Any) -> datetime | None:
         parsed = datetime.fromisoformat(text)
     except ValueError:
         return None
-    return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
 def validate_record(record: Any) -> tuple[str | None, dict[str, Any] | None]:

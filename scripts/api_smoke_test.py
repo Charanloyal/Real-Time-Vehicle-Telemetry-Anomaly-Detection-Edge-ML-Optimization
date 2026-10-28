@@ -28,7 +28,9 @@ def main() -> int:
 
     config = load_config(args.config)
     test = pd.read_parquet(config.paths.processed_dir / TEST_SET_FILE)
-    sample = pd.concat([test[test[LABEL_COLUMN] == 1].head(args.events // 2), test[test[LABEL_COLUMN] == 0].head(args.events // 2)])
+    sample = pd.concat(
+        [test[test[LABEL_COLUMN] == 1].head(args.events // 2), test[test[LABEL_COLUMN] == 0].head(args.events // 2)]
+    )
     events = sample.loc[:, list(REQUIRED_FIELDS)].to_dict("records")
 
     with httpx.Client(base_url=args.url, timeout=30) as client:

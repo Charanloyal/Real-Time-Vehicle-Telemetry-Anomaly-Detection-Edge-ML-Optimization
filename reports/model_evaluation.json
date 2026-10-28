@@ -1,126 +1,390 @@
 {
-  "evaluated_at": "2026-10-27T11:36:21+00:00",
+  "evaluated_at": "2026-10-27T14:15:35+00:00",
   "selected_model": "random_forest",
+  "selected_window_model": "random_forest_window",
   "selection_metric": "average_precision",
   "datasets": {
     "train": {
       "rows": 140000,
       "vehicles": 70,
-      "anomalies": 7059,
-      "anomaly_rate": 0.05042142857142857
+      "anomalies": 12678,
+      "anomaly_rate": 0.09055714285714286,
+      "anomaly_types": {
+        "normal": 127322,
+        "battery_degradation": 3277,
+        "gradual_overheating": 2339,
+        "overheating": 1445,
+        "sensor_combination": 1422,
+        "harsh_acceleration": 1414,
+        "rpm_anomaly": 1397,
+        "battery_voltage": 1384
+      }
     },
     "validation": {
       "rows": 30000,
       "vehicles": 15,
-      "anomalies": 1474,
-      "anomaly_rate": 0.049133333333333334
+      "anomalies": 2849,
+      "anomaly_rate": 0.09496666666666667,
+      "anomaly_types": {
+        "normal": 27151,
+        "gradual_overheating": 893,
+        "battery_degradation": 482,
+        "sensor_combination": 318,
+        "harsh_acceleration": 311,
+        "battery_voltage": 309,
+        "overheating": 270,
+        "rpm_anomaly": 266
+      }
     },
     "test": {
       "rows": 30000,
       "vehicles": 15,
-      "anomalies": 1458,
-      "anomaly_rate": 0.0486
+      "anomalies": 3121,
+      "anomaly_rate": 0.10403333333333334,
+      "anomaly_types": {
+        "normal": 26879,
+        "battery_degradation": 1020,
+        "gradual_overheating": 643,
+        "overheating": 303,
+        "sensor_combination": 297,
+        "battery_voltage": 287,
+        "harsh_acceleration": 286,
+        "rpm_anomaly": 285
+      }
     }
   },
   "results": {
     "random_forest": {
+      "feature_set": "point",
       "metrics": {
-        "threshold": 0.6963431837224596,
-        "precision": 0.8671157379056951,
-        "recall": 0.9711934156378601,
-        "f1": 0.916208346813329,
-        "roc_auc": 0.9990644307395189,
-        "average_precision": 0.9853543283832398,
+        "threshold": 0.7862762417533098,
+        "precision": 0.9139048991354467,
+        "recall": 0.8128804870233899,
+        "f1": 0.8604375105986095,
+        "roc_auc": 0.9572767149168465,
+        "average_precision": 0.8848758990264102,
         "confusion_matrix": [
           [
-            28325,
-            217
+            26640,
+            239
           ],
           [
-            42,
-            1416
+            584,
+            2537
           ]
         ],
         "support": {
-          "normal": 28542,
-          "anomaly": 1458
+          "normal": 26879,
+          "anomaly": 3121
         }
       },
       "by_anomaly_type": {
+        "battery_degradation": {
+          "events": 1020,
+          "recall": 0.592156862745098
+        },
         "battery_voltage": {
-          "events": 292,
-          "recall": 0.9417808219178082
+          "events": 287,
+          "recall": 0.9477351916376306
+        },
+        "gradual_overheating": {
+          "events": 643,
+          "recall": 0.8367029548989113
         },
         "harsh_acceleration": {
-          "events": 291,
-          "recall": 0.993127147766323
+          "events": 286,
+          "recall": 0.9685314685314685
         },
         "normal": {
-          "events": 28542,
-          "false_positive_rate": 0.007602830915843318
+          "events": 26879,
+          "false_positive_rate": 0.00889169984002381
         },
         "overheating": {
-          "events": 297,
-          "recall": 0.9225589225589226
+          "events": 303,
+          "recall": 0.8877887788778878
         },
         "rpm_anomaly": {
-          "events": 282,
-          "recall": 1.0
+          "events": 285,
+          "recall": 0.9859649122807017
         },
         "sensor_combination": {
-          "events": 296,
-          "recall": 1.0
+          "events": 297,
+          "recall": 0.9966329966329966
         }
       }
     },
     "xgboost": {
+      "feature_set": "point",
       "metrics": {
-        "threshold": 0.9419954419136047,
-        "precision": 0.8069863824748372,
-        "recall": 0.9348422496570644,
-        "f1": 0.8662217985382904,
-        "roc_auc": 0.9979233668978089,
-        "average_precision": 0.9687347993400448,
+        "threshold": 0.9276000261306763,
+        "precision": 0.9500396510705789,
+        "recall": 0.7677026594040371,
+        "f1": 0.8491936912989545,
+        "roc_auc": 0.9488861334606216,
+        "average_precision": 0.8731407492885341,
         "confusion_matrix": [
           [
-            28216,
-            326
+            26753,
+            126
           ],
           [
-            95,
-            1363
+            725,
+            2396
           ]
         ],
         "support": {
-          "normal": 28542,
-          "anomaly": 1458
+          "normal": 26879,
+          "anomaly": 3121
         }
       },
       "by_anomaly_type": {
+        "battery_degradation": {
+          "events": 1020,
+          "recall": 0.5254901960784314
+        },
         "battery_voltage": {
-          "events": 292,
-          "recall": 0.7842465753424658
+          "events": 287,
+          "recall": 0.8432055749128919
+        },
+        "gradual_overheating": {
+          "events": 643,
+          "recall": 0.8133748055987559
         },
         "harsh_acceleration": {
-          "events": 291,
-          "recall": 0.9862542955326461
+          "events": 286,
+          "recall": 0.9335664335664335
         },
         "normal": {
-          "events": 28542,
-          "false_positive_rate": 0.01142176441734987
+          "events": 26879,
+          "false_positive_rate": 0.004687674392648536
         },
         "overheating": {
-          "events": 297,
-          "recall": 0.9090909090909091
+          "events": 303,
+          "recall": 0.8778877887788779
         },
         "rpm_anomaly": {
-          "events": 282,
-          "recall": 0.9964539007092199
+          "events": 285,
+          "recall": 0.9368421052631579
         },
         "sensor_combination": {
-          "events": 296,
+          "events": 297,
+          "recall": 0.9932659932659933
+        }
+      }
+    },
+    "random_forest_window": {
+      "feature_set": "window",
+      "metrics": {
+        "threshold": 0.40785349434610985,
+        "precision": 0.9537299338999056,
+        "recall": 0.9708426786286447,
+        "f1": 0.9622102254684026,
+        "roc_auc": 0.9985032785862626,
+        "average_precision": 0.9923526205072897,
+        "confusion_matrix": [
+          [
+            26732,
+            147
+          ],
+          [
+            91,
+            3030
+          ]
+        ],
+        "support": {
+          "normal": 26879,
+          "anomaly": 3121
+        }
+      },
+      "by_anomaly_type": {
+        "battery_degradation": {
+          "events": 1020,
+          "recall": 0.9892156862745098
+        },
+        "battery_voltage": {
+          "events": 287,
+          "recall": 0.9895470383275261
+        },
+        "gradual_overheating": {
+          "events": 643,
+          "recall": 0.9035769828926905
+        },
+        "harsh_acceleration": {
+          "events": 286,
+          "recall": 1.0
+        },
+        "normal": {
+          "events": 26879,
+          "false_positive_rate": 0.005468953458089959
+        },
+        "overheating": {
+          "events": 303,
+          "recall": 0.9504950495049505
+        },
+        "rpm_anomaly": {
+          "events": 285,
+          "recall": 1.0
+        },
+        "sensor_combination": {
+          "events": 297,
           "recall": 1.0
         }
+      }
+    },
+    "xgboost_window": {
+      "feature_set": "window",
+      "metrics": {
+        "threshold": 0.7085802555084229,
+        "precision": 0.9709858226178701,
+        "recall": 0.9436078180070491,
+        "f1": 0.9571010724731882,
+        "roc_auc": 0.998101499380869,
+        "average_precision": 0.9896956990888427,
+        "confusion_matrix": [
+          [
+            26791,
+            88
+          ],
+          [
+            176,
+            2945
+          ]
+        ],
+        "support": {
+          "normal": 26879,
+          "anomaly": 3121
+        }
+      },
+      "by_anomaly_type": {
+        "battery_degradation": {
+          "events": 1020,
+          "recall": 0.9705882352941176
+        },
+        "battery_voltage": {
+          "events": 287,
+          "recall": 0.9860627177700348
+        },
+        "gradual_overheating": {
+          "events": 643,
+          "recall": 0.8195956454121306
+        },
+        "harsh_acceleration": {
+          "events": 286,
+          "recall": 0.993006993006993
+        },
+        "normal": {
+          "events": 26879,
+          "false_positive_rate": 0.003273931321849771
+        },
+        "overheating": {
+          "events": 303,
+          "recall": 0.9273927392739274
+        },
+        "rpm_anomaly": {
+          "events": 285,
+          "recall": 0.9929824561403509
+        },
+        "sensor_combination": {
+          "events": 297,
+          "recall": 1.0
+        }
+      }
+    },
+    "isolation_forest": {
+      "feature_set": "window",
+      "metrics": {
+        "threshold": 0.4705407225825639,
+        "precision": 0.4381247845570493,
+        "recall": 0.40724126882409484,
+        "f1": 0.42211889737628694,
+        "roc_auc": 0.8477779404656077,
+        "average_precision": 0.4975756803732015,
+        "confusion_matrix": [
+          [
+            25249,
+            1630
+          ],
+          [
+            1850,
+            1271
+          ]
+        ],
+        "support": {
+          "normal": 26879,
+          "anomaly": 3121
+        }
+      },
+      "by_anomaly_type": {
+        "battery_degradation": {
+          "events": 1020,
+          "recall": 0.3431372549019608
+        },
+        "battery_voltage": {
+          "events": 287,
+          "recall": 0.5261324041811847
+        },
+        "gradual_overheating": {
+          "events": 643,
+          "recall": 0.07465007776049767
+        },
+        "harsh_acceleration": {
+          "events": 286,
+          "recall": 0.9895104895104895
+        },
+        "normal": {
+          "events": 26879,
+          "false_positive_rate": 0.06064213698426281
+        },
+        "overheating": {
+          "events": 303,
+          "recall": 0.22112211221122113
+        },
+        "rpm_anomaly": {
+          "events": 285,
+          "recall": 0.2771929824561403
+        },
+        "sensor_combination": {
+          "events": 297,
+          "recall": 0.9865319865319865
+        }
+      }
+    }
+  },
+  "onnx": {
+    "random_forest": {
+      "file": "random_forest.onnx",
+      "size_bytes": 5252018,
+      "validation_parity": {
+        "max_abs_score_diff": 8.588075520732374e-07,
+        "decision_agreement": 0.9999666666666667,
+        "events_checked": 30000
+      }
+    },
+    "xgboost": {
+      "file": "xgboost.onnx",
+      "size_bytes": 192818,
+      "validation_parity": {
+        "max_abs_score_diff": 8.940696716308594e-08,
+        "decision_agreement": 1.0,
+        "events_checked": 30000
+      }
+    },
+    "random_forest_window": {
+      "file": "random_forest_window.onnx",
+      "size_bytes": 4703381,
+      "validation_parity": {
+        "max_abs_score_diff": 8.54798265836898e-07,
+        "decision_agreement": 1.0,
+        "events_checked": 30000
+      }
+    },
+    "xgboost_window": {
+      "file": "xgboost_window.onnx",
+      "size_bytes": 223105,
+      "validation_parity": {
+        "max_abs_score_diff": 8.754432201385498e-08,
+        "decision_agreement": 1.0,
+        "events_checked": 30000
       }
     }
   }

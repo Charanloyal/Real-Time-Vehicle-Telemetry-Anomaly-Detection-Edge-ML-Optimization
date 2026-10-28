@@ -33,18 +33,31 @@ def small_config(root: Path) -> AppConfig:
         base,
         project_root=root,
         paths=make_paths(root),
-        data_generation=replace(base.data_generation, num_vehicles=20, events_per_vehicle=500),
+        data_generation=replace(
+            base.data_generation, num_vehicles=20, events_per_vehicle=1500, drift_episodes_per_1000_events=1.5
+        ),
         streaming_data=replace(
-            base.streaming_data, num_vehicles=4, num_files=4, events_per_file=400,
-            malformed_rate=0.03, duplicate_rate=0.02,
+            base.streaming_data,
+            num_vehicles=4,
+            num_files=4,
+            events_per_file=1000,
+            malformed_rate=0.03,
+            duplicate_rate=0.02,
+            drift_episodes_per_1000_events=1.5,
         ),
         training=replace(
             base.training,
             random_forest={**base.training.random_forest, "n_estimators": 25, "n_jobs": 2},
             xgboost={**base.training.xgboost, "n_estimators": 60, "n_jobs": 2},
+            isolation_forest={**base.training.isolation_forest, "n_estimators": 50, "n_jobs": 2},
         ),
         benchmark=replace(
-            base.benchmark, single_iterations=20, warmup_iterations=3, batch_size=50, batch_iterations=2
+            base.benchmark,
+            single_iterations=20,
+            warmup_iterations=3,
+            batch_size=50,
+            batch_iterations=2,
+            load_iterations=1,
         ),
         logging=LoggingConfig(level="WARNING", json=False),
     )

@@ -30,7 +30,7 @@ class LocalCheckpoint:
     next_batch_id: int = 0
 
     @classmethod
-    def load(cls, checkpoint_dir: Path) -> "LocalCheckpoint":
+    def load(cls, checkpoint_dir: Path) -> LocalCheckpoint:
         path = checkpoint_dir / CHECKPOINT_FILE
         if path.is_file():
             state = json.loads(path.read_text(encoding="utf-8"))
@@ -51,7 +51,8 @@ class LocalCheckpoint:
 
 def _pending_files(input_dir: Path, processed: set[str]) -> list[Path]:
     return sorted(
-        p for p in input_dir.glob(INPUT_GLOB)
+        p
+        for p in input_dir.glob(INPUT_GLOB)
         if p.is_file() and not p.name.startswith((".", "_")) and p.name not in processed
     )
 
@@ -102,8 +103,12 @@ def run_local_stream(
     checkpoint = LocalCheckpoint.load(checkpoint_dir)
     logger.info(
         "Local streaming engine started",
-        extra={"input_dir": str(input_dir), "resume_from_batch": checkpoint.next_batch_id,
-               "already_processed_files": len(checkpoint.processed_files), "trigger": trigger},
+        extra={
+            "input_dir": str(input_dir),
+            "resume_from_batch": checkpoint.next_batch_id,
+            "already_processed_files": len(checkpoint.processed_files),
+            "trigger": trigger,
+        },
     )
     if trigger == "available_now":
         return process_available(input_dir, checkpoint, processor, max_files_per_trigger)

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 _RESERVED_ATTRS = set(vars(logging.LogRecord("", 0, "", 0, "", (), None))) | {
@@ -18,9 +18,7 @@ _HANDLER_NAME = "vehicle_anomaly_handler"
 
 def _extra_fields(record: logging.LogRecord) -> dict[str, Any]:
     return {
-        key: value
-        for key, value in record.__dict__.items()
-        if key not in _RESERVED_ATTRS and not key.startswith("_")
+        key: value for key, value in record.__dict__.items() if key not in _RESERVED_ATTRS and not key.startswith("_")
     }
 
 
@@ -32,9 +30,7 @@ class StructuredFormatter(logging.Formatter):
         self.json_format = json_format
 
     def format(self, record: logging.LogRecord) -> str:
-        timestamp = datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(
-            timespec="milliseconds"
-        )
+        timestamp = datetime.fromtimestamp(record.created, tz=UTC).isoformat(timespec="milliseconds")
         extras = _extra_fields(record)
         if self.json_format:
             payload: dict[str, Any] = {

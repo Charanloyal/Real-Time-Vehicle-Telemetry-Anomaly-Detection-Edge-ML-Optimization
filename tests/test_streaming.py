@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import json
 
+import numpy as np
 import pandas as pd
 import pytest
 
 from vehicle_anomaly.config import AppConfig
-from vehicle_anomaly.data_generator import generate_streaming_data, generate_telemetry, write_streaming_files
-from vehicle_anomaly.predict import AnomalyPredictor
+from vehicle_anomaly.data_generator import (
+    demo_fleet_events,
+    generate_streaming_data,
+    generate_telemetry,
+    write_streaming_files,
+)
+from vehicle_anomaly.predict import AnomalyPredictor, WindowAnomalyPredictor
+from vehicle_anomaly.schema import REQUIRED_FIELDS
 from vehicle_anomaly.stream_common import BatchProcessor, load_batch_metrics, load_predictions
 from vehicle_anomaly.streaming import (
     build_spark_session,
@@ -48,6 +55,64 @@ def test_local_engine_end_to_end(stream_config: AppConfig) -> None:
     assert all(row["invalid_reason"] for row in quarantined)
     reports = stream_config.paths.reports_dir
     assert (reports / "streaming_summary.md").is_file() and (reports / "figures" / "streaming_batches.png").is_file()
+    assert summary["run"]["feature_set"] == "window"
+    assert (
+        "battery_degradation" in summary["ground_truth_comparison"]["by_type"]
+        or "gradual_overheating" in summary["ground_truth_comparison"]["by_type"]
+    )
+    state_files = sorted((stream_config.paths.streaming_output / "state").glob("batch_*.json"))
+    assert [f.name for f in state_files] == ["batch_000000.json", "batch_000001.json"]
+    state = json.loads(state_files[-1].read_text(encoding="utf-8"))
+    assert set(state) == set(predictions["vehicle_id"])
+
+
+def test_replayed_batch_after_crash_reproduces_window_scores(stream_config: AppConfig) -> None:
+    """Simulate a crash after batch 1 wrote its outputs but before its checkpoint commit."""
+    generate_streaming_data(stream_config)
+    run_streaming(stream_config, engine="local", reset=True)
+    original = load_predictions(stream_config.paths.streaming_output).set_index("event_id")["anomaly_score"]
+
+    checkpoint = stream_config.paths.checkpoint_dir / "local" / "local_engine_state.json"
+    state = json.loads(checkpoint.read_text(encoding="utf-8"))
+    checkpoint.write_text(
+        json.dumps({"processed_files": state["processed_files"][:2], "next_batch_id": 1}), encoding="utf-8"
+    )
+    replay = run_streaming(stream_config, engine="local")
+    assert replay["run"]["batches_this_run"] == 1 and replay["batches"] == 2
+    replayed = load_predictions(stream_config.paths.streaming_output).set_index("event_id")["anomaly_score"]
+    pd.testing.assert_series_equal(replayed.sort_index(), original.sort_index())
+
+
+def test_batch_without_rows_does_not_reset_window_state(stream_config: AppConfig, tmp_path) -> None:
+    """Spark skips empty micro-batches (no state file); the next batch must continue from the last state."""
+    events = demo_fleet_events(seed=3, start=0, n=800, anomaly_rate=0.05, drift_rate=3.0)
+    valid = events.loc[:, list(REQUIRED_FIELDS)]
+    no_invalid = pd.DataFrame(columns=["raw_value", "invalid_reason"])
+    predictor = WindowAnomalyPredictor.load(stream_config.paths.model_dir)
+    expected, _ = predictor.predict_frame(valid)
+
+    for restart in (False, True):
+        out = tmp_path / f"restart_{restart}"
+        processor = BatchProcessor(predictor, out)
+        processor.process(0, valid.iloc[:400], no_invalid, 400, "spark")
+        # batch 1 was empty: process() is never called for it, so no state/batch_000001.json exists
+        if restart:
+            processor = BatchProcessor(predictor, out)  # new process: state must come from disk
+        processor.process(2, valid.iloc[400:], no_invalid, 400, "spark")
+        scores = load_predictions(out).set_index("event_id")["anomaly_score"]
+        np.testing.assert_allclose(
+            scores.loc[expected["event_id"]].to_numpy(), expected["anomaly_score"].to_numpy(), rtol=0, atol=1e-12
+        )
+
+
+def test_point_feature_set_streaming(stream_config: AppConfig) -> None:
+    from dataclasses import replace
+
+    config = replace(stream_config, streaming=replace(stream_config.streaming, feature_set="point"))
+    generated = generate_streaming_data(config)
+    summary = run_streaming(config, engine="local", reset=True)
+    assert summary["run"]["feature_set"] == "point" and summary["scored_rows"] == generated.clean_events
+    assert not list((config.paths.streaming_output / "state").glob("*.json"))
 
 
 def test_local_engine_recovers_from_checkpoint(stream_config: AppConfig) -> None:
@@ -59,10 +124,16 @@ def test_local_engine_recovers_from_checkpoint(stream_config: AppConfig) -> None
     assert rerun["batches"] == first["batches"]  # nothing re-processed, metrics unchanged
     assert rerun["input_rows"] == first["input_rows"]
 
-    extra = generate_telemetry(num_vehicles=1, events_per_vehicle=100, anomaly_rate=0.05, seed=99,
-                               vehicle_prefix="NEW")
-    write_streaming_files(extra, stream_config.paths.streaming_input, num_files=1, malformed_rate=0.0,
-                          duplicate_rate=0.0, seed=1, file_prefix="zz_late")
+    extra = generate_telemetry(num_vehicles=1, events_per_vehicle=100, anomaly_rate=0.05, seed=99, vehicle_prefix="NEW")
+    write_streaming_files(
+        extra,
+        stream_config.paths.streaming_input,
+        num_files=1,
+        malformed_rate=0.0,
+        duplicate_rate=0.0,
+        seed=1,
+        file_prefix="zz_late",
+    )
     resumed = run_streaming(stream_config, engine="local")
     assert resumed["run"]["batches_this_run"] == 1
     assert resumed["batches"] == first["batches"] + 1
@@ -111,8 +182,15 @@ def test_spark_validation_and_batch_processing_match_local(
         spark.stop()
 
     assert spark_metrics is not None
-    for field in ("input_rows", "valid_rows", "invalid_rows", "duplicates_dropped", "scored_rows",
-                  "anomalies_detected", "invalid_by_reason"):
+    for field in (
+        "input_rows",
+        "valid_rows",
+        "invalid_rows",
+        "duplicates_dropped",
+        "scored_rows",
+        "anomalies_detected",
+        "invalid_by_reason",
+    ):
         assert getattr(spark_metrics, field) == getattr(local_metrics, field), field
     merged = load_predictions(tmp_path / "local").merge(
         load_predictions(tmp_path / "spark"), on="event_id", suffixes=("_local", "_spark")

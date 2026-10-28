@@ -20,6 +20,8 @@ data_generation:
   events_per_vehicle: 2000
   anomaly_rate: 0.05
   hard_braking_rate: 0.004        # legitimate (non-anomalous) emergency braking events
+  drift_episodes_per_1000_events: 0.3   # gradual faults (gradual_overheating, battery_degradation)
+  warm_start_rate: 0.5            # share of vehicles whose recording starts mid-trip with a warm engine
   event_interval_seconds: 1.0
   start_time: "2026-01-01T00:00:00+00:00"
   base_latitude: 40.0
@@ -31,6 +33,7 @@ streaming_data:
   num_files: 20
   events_per_file: 5000
   anomaly_rate: 0.05
+  drift_episodes_per_1000_events: 0.3
   malformed_rate: 0.01
   duplicate_rate: 0.005
   seed_offset: 1000
@@ -38,7 +41,9 @@ streaming_data:
 training:
   validation_size: 0.15
   test_size: 0.15
-  models: [random_forest, xgboost]
+  # point models score one event; *_window models add per-vehicle history features; isolation_forest is
+  # an unsupervised baseline on the window feature set. See src/vehicle_anomaly/train.py.
+  models: [random_forest, xgboost, random_forest_window, xgboost_window, isolation_forest]
   selection_metric: average_precision   # chosen on the validation split, never on test
   random_forest:
     n_estimators: 150
@@ -55,16 +60,22 @@ training:
     tree_method: hist
     n_jobs: -1
     early_stopping_rounds: 30
+  isolation_forest:
+    n_estimators: 200
+    max_samples: 512
+    n_jobs: -1
 
 benchmark:
-  model: null                 # null = model selected during training
+  model: null                 # null = every supervised point model
   single_iterations: 2000
   warmup_iterations: 100
   batch_size: 1000
   batch_iterations: 20
+  load_iterations: 5          # cold model-load timing repetitions
 
 streaming:
   engine: auto                # auto | spark | local
+  feature_set: window         # window (stateful per-vehicle features) | point
   trigger: available_now      # available_now | processing_time
   processing_interval_seconds: 5
   max_runtime_seconds: null   # only used with processing_time trigger
@@ -76,7 +87,8 @@ streaming:
 api:
   max_batch_size: 1000
   default_port: 8000
-  inference_threads: null     # null = library default (all cores); set 1 on small shared-CPU hosts
+  runtime: native             # native (scikit-learn / XGBoost) | onnx (ONNX Runtime); env VTAD_RUNTIME
+  inference_threads: null     # null = library default (all cores; ONNX Runtime: 1); set 1 on small shared-CPU hosts
 
 logging:
   level: INFO

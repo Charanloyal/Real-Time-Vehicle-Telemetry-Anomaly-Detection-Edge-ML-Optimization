@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vehicle-telemetry-anomaly-detection"
-version = "0.1.0"
-description = "Real-time vehicle telemetry anomaly detection with PySpark Structured Streaming, scikit-learn/XGBoost and FastAPI."
+version = "0.2.0"
+description = "Real-time vehicle telemetry anomaly detection with PySpark Structured Streaming, scikit-learn/XGBoost, ONNX Runtime and FastAPI."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26,<3",
     "pandas>=2.2,<3",
@@ -20,11 +20,22 @@ dependencies = [
     "uvicorn>=0.30,<1",
     "pydantic>=2.7,<3",
     "matplotlib>=3.8,<4",
+    "onnxruntime>=1.20,<2",
+    "onnx>=1.17,<2",
+    "skl2onnx>=1.18,<2",
+    "onnxmltools>=1.13,<2",
 ]
 
 [project.optional-dependencies]
 spark = ["pyspark>=3.5,<4.2"]
-dev = ["pytest>=8,<9", "httpx>=0.27,<1"]
+dev = [
+    "pytest>=8,<9",
+    "httpx>=0.27,<1",
+    "ruff>=0.8,<1",
+    "mypy>=1.13,<3",
+    "types-PyYAML>=6",
+    "pandas-stubs>=2.2,<3",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -41,3 +52,38 @@ markers = [
 filterwarnings = [
     "ignore::DeprecationWarning:pyspark.*",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src", "tests", "scripts"]
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, isort, bugbear, pyupgrade, naming, simplify, ruff-specific
+select = ["E", "W", "F", "I", "B", "UP", "N", "SIM", "RUF"]
+ignore = [
+    "RUF001", "RUF002", "RUF003",  # unicode units (°C, m/s²) in strings and docs are intentional
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["N802", "N806"]
+# scikit-learn transformer API uses an upper-case `X` argument.
+"src/vehicle_anomaly/preprocessing.py" = ["N803"]
+# `from pyspark.sql import functions as F` is the PySpark convention.
+"src/vehicle_anomaly/streaming.py" = ["N812"]
+
+[tool.mypy]
+python_version = "3.11"
+platform = "linux"            # same results locally (Windows) and in CI; Windows-only branches are skipped
+mypy_path = "src"
+packages = ["vehicle_anomaly"]
+strict = true
+warn_unreachable = true
+disallow_subclassing_any = false   # scikit-learn base classes are untyped
+# Third-party libraries without type information.
+[[tool.mypy.overrides]]
+module = [
+    "sklearn.*", "joblib.*", "xgboost.*", "pyspark.*", "onnx.*", "onnxruntime.*", "skl2onnx.*",
+    "onnxmltools.*", "matplotlib.*", "pyarrow.*",
+]
+ignore_missing_imports = true

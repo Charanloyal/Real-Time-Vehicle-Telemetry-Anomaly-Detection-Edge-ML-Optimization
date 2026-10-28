@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import replace
-from typing import Iterator
 
 import pandas as pd
 import pytest
@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from vehicle_anomaly.api import create_app
 from vehicle_anomaly.config import AppConfig
+from vehicle_anomaly.data_generator import DEMO_STREAM_LENGTH
 from vehicle_anomaly.schema import LABEL_COLUMN, REQUIRED_FIELDS
 from vehicle_anomaly.train import TEST_SET_FILE
 
@@ -114,43 +115,104 @@ def test_degraded_mode_without_model(trained_config: AppConfig, tmp_path, events
         response = degraded.post("/predict", json=events[0])
         assert response.status_code == 503
         assert "train_model.py" in response.json()["detail"]
+        stream = degraded.post("/predict-stream", json={"events": events})
+        assert stream.status_code == 503 and "Window model not loaded" in stream.json()["detail"]
 
 
 def test_demo_page_served_at_root(client: TestClient) -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
-    assert "Live stream simulation" in response.text and "/predict-batch" in response.text
+    assert "point model vs window model" in response.text and "/predict-stream" in response.text
 
 
-def test_demo_events_are_scorable_and_unlabelled(client: TestClient) -> None:
-    response = client.get("/demo/events", params={"n": 30, "anomaly_rate": 0.3, "seed": 5})
-    assert response.status_code == 200
-    body = response.json()
-    assert body["seed"] == 5 and len(body["events"]) == len(body["ground_truth"]) == 30
-    assert all(set(event) == set(REQUIRED_FIELDS) for event in body["events"])
-    assert [e["event_id"] for e in body["events"]] == [g["event_id"] for g in body["ground_truth"]]
-    assert any(g["is_anomaly"] for g in body["ground_truth"])
-    scored = client.post("/predict-batch", json={"events": body["events"]})
+def test_demo_events_are_contiguous_and_unlabelled(client: TestClient) -> None:
+    first = client.get("/demo/events", params={"seed": 5, "start": 0, "n": 30}).json()
+    second = client.get("/demo/events", params={"seed": 5, "start": 30, "n": 30}).json()
+    whole = client.get("/demo/events", params={"seed": 5, "start": 0, "n": 60}).json()
+    assert first["seed"] == 5 and first["next_start"] == 30 and second["next_start"] == 60
+    assert first["events"] + second["events"] == whole["events"]
+    assert all(set(event) == set(REQUIRED_FIELDS) for event in first["events"])
+    assert [e["event_id"] for e in first["events"]] == [g["event_id"] for g in first["ground_truth"]]
+    scored = client.post("/predict-batch", json={"events": first["events"]})
     assert scored.status_code == 200 and scored.json()["count"] == 30
 
 
-def test_demo_events_reproducible_with_seed(client: TestClient) -> None:
-    first = client.get("/demo/events", params={"n": 5, "seed": 11}).json()["events"]
-    second = client.get("/demo/events", params={"n": 5, "seed": 11}).json()["events"]
-    strip = lambda rows: [{k: v for k, v in r.items() if k != "event_timestamp"} for r in rows]  # noqa: E731
-    assert strip(first) == strip(second)
+def test_demo_events_end_of_stream(client: TestClient) -> None:
+    body = client.get("/demo/events", params={"seed": 5, "start": DEMO_STREAM_LENGTH - 10, "n": 50}).json()
+    assert len(body["events"]) == 10 and body["next_start"] == body["stream_length"] == DEMO_STREAM_LENGTH
 
 
-@pytest.mark.parametrize("params", [{"n": 0}, {"n": 201}, {"anomaly_rate": 0.9}, {"seed": -1}])
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"n": 0},
+        {"n": 201},
+        {"anomaly_rate": 0.9},
+        {"seed": -1},
+        {"start": -1},
+        {"start": DEMO_STREAM_LENGTH},
+        {"drift_rate": 50},
+    ],
+)
 def test_demo_events_rejects_bad_parameters(client: TestClient, params: dict) -> None:
     assert client.get("/demo/events", params=params).status_code == 422
+
+
+def test_predict_stream_state_round_trip(client: TestClient) -> None:
+    events = client.get("/demo/events", params={"seed": 9, "start": 0, "n": 200}).json()["events"]
+    single = client.post("/predict-stream", json={"events": events}).json()
+    first = client.post("/predict-stream", json={"events": events[:120]}).json()
+    second = client.post("/predict-stream", json={"events": events[120:], "state": first["state"]}).json()
+    assert [p["anomaly_score"] for p in first["predictions"] + second["predictions"]] == [
+        p["anomaly_score"] for p in single["predictions"]
+    ]
+    assert second["state"] == single["state"]
+    assert set(single["state"]) == {e["vehicle_id"] for e in events}
+    assert single["model_name"] == client.get("/health").json()["window_model_name"]
+    restarted = client.post("/predict-stream", json={"events": events[120:]}).json()
+    assert [p["anomaly_score"] for p in restarted["predictions"]] != [p["anomaly_score"] for p in second["predictions"]]
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        {"V": {"temp_long": "hot", "temp_short": 1, "battery_long": 1, "battery_short": 1, "count": 1}},
+        {"V": {"temp_long": 90, "temp_short": 90, "battery_long": 14, "battery_short": 14, "count": -1}},
+        {"V": {"temp_long": 90}},
+        {
+            f"V{i}": {"temp_long": 90, "temp_short": 90, "battery_long": 14, "battery_short": 14, "count": 1}
+            for i in range(1001)
+        },
+    ],
+)
+def test_predict_stream_rejects_invalid_state(client: TestClient, events: list[dict], state: dict) -> None:
+    assert client.post("/predict-stream", json={"events": events, "state": state}).status_code == 422
+
+
+def test_model_info_includes_window_model(client: TestClient) -> None:
+    body = client.get("/model-info").json()
+    assert body["feature_set"] == "point" and body["runtime"] == "native"
+    assert body["window_model"]["feature_set"] == "window"
+    assert "temp_dev" in body["window_model"]["feature_columns"]
+
+
+def test_onnx_runtime_app(trained_config: AppConfig, client: TestClient, events: list[dict]) -> None:
+    config = replace(trained_config, api=replace(trained_config.api, runtime="onnx", inference_threads=1))
+    native = client.post("/predict-batch", json={"events": events}).json()["predictions"]
+    with TestClient(create_app(config=config)) as onnx_client:
+        health = onnx_client.get("/health").json()
+        assert health["runtime"] == "onnx" and health["status"] == "ok"
+        scored = onnx_client.post("/predict-batch", json={"events": events}).json()["predictions"]
+        assert onnx_client.post("/predict-stream", json={"events": events}).status_code == 200
+    for a, b in zip(native, scored, strict=True):
+        assert a["anomaly_score"] == pytest.approx(b["anomaly_score"], abs=1e-5)
 
 
 def test_demo_reports(client: TestClient) -> None:
     body = client.get("/demo/reports").json()
     assert set(body) == {"model_evaluation", "benchmark", "streaming"}
-    assert body["model_evaluation"]["selected_model"]
+    assert body["model_evaluation"]["selected_model"] and body["model_evaluation"]["selected_window_model"]
 
 
 def test_demo_figures(client: TestClient) -> None:

@@ -16,6 +16,9 @@ services:
     envVars:
       - key: LOG_LEVEL
         value: INFO
+      # Serve the ONNX exports with ONNX Runtime (validated for score parity at training time).
+      - key: VTAD_RUNTIME
+        value: onnx
       # The free plan has a fraction of one CPU; extra inference threads only add contention.
       - key: VTAD_INFERENCE_THREADS
         value: "1"

@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from vehicle_anomaly.data_generator import generate_telemetry, sample_demo_events, write_streaming_files
+from vehicle_anomaly.data_generator import (
+    DEMO_STREAM_LENGTH,
+    demo_fleet_events,
+    generate_telemetry,
+    write_streaming_files,
+)
 from vehicle_anomaly.schema import (
     ANOMALY_TYPE_COLUMN,
-    ANOMALY_TYPES,
+    DRIFT_ANOMALY_TYPES,
     LABEL_COLUMN,
     NORMAL_TYPE,
+    POINT_ANOMALY_TYPES,
     REQUIRED_FIELDS,
     VALID_RANGES,
 )
@@ -58,7 +63,7 @@ def test_timestamps_are_utc_and_increase_per_vehicle(telemetry: pd.DataFrame) ->
 def test_anomaly_labels(telemetry: pd.DataFrame) -> None:
     rate = telemetry[LABEL_COLUMN].mean()
     assert 0.035 < rate < 0.065
-    assert set(telemetry[ANOMALY_TYPE_COLUMN]) == {NORMAL_TYPE, *ANOMALY_TYPES}
+    assert set(telemetry[ANOMALY_TYPE_COLUMN]) == {NORMAL_TYPE, *POINT_ANOMALY_TYPES}  # drift is off by default
     assert (telemetry[LABEL_COLUMN].astype(bool) == (telemetry[ANOMALY_TYPE_COLUMN] != NORMAL_TYPE)).all()
 
 
@@ -71,24 +76,51 @@ def test_anomalies_differ_from_normal_behaviour(telemetry: pd.DataFrame) -> None
     assert not battery["battery_voltage"].between(13.25, 14.85).any()
 
 
-def test_sample_demo_events_skip_cold_start_and_are_recent() -> None:
-    sample = sample_demo_events(n=50, anomaly_rate=0.2, seed=3)
-    assert len(sample) == 50 and sample["event_id"].is_unique
-    assert list(sample.columns) == [*REQUIRED_FIELDS, LABEL_COLUMN, ANOMALY_TYPE_COLUMN]
-    timestamps = pd.to_datetime(sample["event_timestamp"], utc=True)
-    now = datetime.now(timezone.utc)
-    assert (timestamps <= now).all() and (timestamps > now - timedelta(hours=2)).all()
-    warm = sample[sample[LABEL_COLUMN] == 0]["engine_temperature"]
-    assert warm.median() > 80  # warm-up period excluded, so engines are near operating temperature
-    with pytest.raises(ValueError):
-        sample_demo_events(n=0, anomaly_rate=0.1, seed=1)
+def test_gradual_drift_injection() -> None:
+    df = generate_telemetry(
+        num_vehicles=12, events_per_vehicle=2000, anomaly_rate=0.0, seed=21, drift_episodes_per_1000_events=1.5
+    )
+    assert set(df[ANOMALY_TYPE_COLUMN]) == {NORMAL_TYPE, *DRIFT_ANOMALY_TYPES}
+    position = df.groupby("vehicle_id").cumcount()
+    assert position[df[LABEL_COLUMN] == 1].min() >= 300  # drifts start after a baseline exists
+    for vehicle, group in df.groupby("vehicle_id"):
+        normal = group[group[ANOMALY_TYPE_COLUMN] == NORMAL_TYPE]
+        hot = group[group[ANOMALY_TYPE_COLUMN] == "gradual_overheating"]
+        weak = group[group[ANOMALY_TYPE_COLUMN] == "battery_degradation"]
+        if len(hot):
+            assert hot["engine_temperature"].mean() > normal["engine_temperature"].tail(500).mean() + 4, vehicle
+        if len(weak):
+            assert weak["battery_voltage"].mean() < normal["battery_voltage"].median() - 0.4, vehicle
+
+
+def test_warm_start_rate_controls_engine_warm_up() -> None:
+    cold = generate_telemetry(num_vehicles=5, events_per_vehicle=400, anomaly_rate=0.0, seed=2, warm_start_rate=0.0)
+    warm = generate_telemetry(num_vehicles=5, events_per_vehicle=400, anomaly_rate=0.0, seed=2, warm_start_rate=1.0)
+    first_cold = cold.groupby("vehicle_id")["engine_temperature"].first()
+    first_warm = warm.groupby("vehicle_id")["engine_temperature"].first()
+    assert first_cold.max() < 60 < 80 < first_warm.min()
+
+
+def test_demo_fleet_stream_is_contiguous_and_deterministic() -> None:
+    whole = demo_fleet_events(seed=5, start=0, n=200, anomaly_rate=0.05, drift_rate=3.0)
+    pieces = pd.concat(
+        [demo_fleet_events(seed=5, start=s, n=50, anomaly_rate=0.05, drift_rate=3.0) for s in range(0, 200, 50)],
+        ignore_index=True,
+    )
+    pd.testing.assert_frame_equal(whole, pieces)
+    assert whole["vehicle_id"].nunique() == 4
+    assert pd.to_datetime(whole["event_timestamp"], utc=True).is_monotonic_increasing
+    assert whole["engine_temperature"].median() > 80  # warm engines from the first event
+    full = demo_fleet_events(seed=5, start=0, n=DEMO_STREAM_LENGTH - 1, anomaly_rate=0.05, drift_rate=3.0)
+    assert set(DRIFT_ANOMALY_TYPES) <= set(full[ANOMALY_TYPE_COLUMN])
+    for bad in ((-1, 10), (DEMO_STREAM_LENGTH - 5, 10), (0, 0)):
+        with pytest.raises(ValueError):
+            demo_fleet_events(seed=5, start=bad[0], n=bad[1], anomaly_rate=0.05, drift_rate=3.0)
 
 
 def test_streaming_files_contain_expected_faults(tmp_path) -> None:
     events = generate_telemetry(num_vehicles=2, events_per_vehicle=500, anomaly_rate=0.05, seed=3)
-    summary = write_streaming_files(
-        events, tmp_path, num_files=3, malformed_rate=0.05, duplicate_rate=0.02, seed=5
-    )
+    summary = write_streaming_files(events, tmp_path, num_files=3, malformed_rate=0.05, duplicate_rate=0.02, seed=5)
     files = sorted(tmp_path.glob("*.jsonl"))
     assert [f.name for f in files] == summary.files
     assert not list(tmp_path.glob(".*"))  # no temp files left behind

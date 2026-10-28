@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-from sklearn.metrics import precision_recall_curve, roc_curve  # noqa: E402
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.figure import Figure
+from sklearn.metrics import precision_recall_curve, roc_curve
 
 
-def _save(fig: plt.Figure, path: Path) -> Path:
+def _save(fig: Figure, path: Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.tight_layout()
     fig.savefig(path, dpi=120)
@@ -23,7 +25,7 @@ def _save(fig: plt.Figure, path: Path) -> Path:
 
 def plot_confusion_matrices(matrices: Mapping[str, Sequence[Sequence[int]]], path: Path) -> Path:
     fig, axes = plt.subplots(1, len(matrices), figsize=(4.5 * len(matrices), 4), squeeze=False)
-    for ax, (name, matrix) in zip(axes[0], matrices.items()):
+    for ax, (name, matrix) in zip(axes[0], matrices.items(), strict=True):
         data = np.asarray(matrix)
         ax.imshow(data, cmap="Blues")
         for (row, col), value in np.ndenumerate(data):
@@ -52,11 +54,9 @@ def plot_roc_pr_curves(curves: Mapping[str, tuple[np.ndarray, np.ndarray]], path
     return _save(fig, path)
 
 
-def plot_feature_importance(
-    importances: Mapping[str, np.ndarray], feature_names: Sequence[str], path: Path
-) -> Path:
-    fig, axes = plt.subplots(1, len(importances), figsize=(5.5 * len(importances), 4.5), squeeze=False)
-    for ax, (name, values) in zip(axes[0], importances.items()):
+def plot_feature_importance(importances: Mapping[str, tuple[Sequence[str], np.ndarray]], path: Path) -> Path:
+    fig, axes = plt.subplots(1, len(importances), figsize=(6 * len(importances), 5), squeeze=False)
+    for ax, (name, (feature_names, values)) in zip(axes[0], importances.items(), strict=True):
         order = np.argsort(values)
         ax.barh(np.asarray(feature_names)[order], np.asarray(values)[order], color="#4C72B0")
         ax.set_title(f"{name} feature importance")

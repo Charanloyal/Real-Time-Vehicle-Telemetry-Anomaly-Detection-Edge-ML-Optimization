@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -31,7 +32,7 @@ def compute_derived_features(columns: Mapping[str, Any]) -> dict[str, Any]:
 class TelemetryFeatureBuilder(BaseEstimator, TransformerMixin):
     """Selects model input fields from a telemetry DataFrame and appends derived features."""
 
-    def fit(self, X: pd.DataFrame, y: Any = None) -> "TelemetryFeatureBuilder":
+    def fit(self, X: pd.DataFrame, y: Any = None) -> TelemetryFeatureBuilder:
         return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
@@ -41,7 +42,8 @@ class TelemetryFeatureBuilder(BaseEstimator, TransformerMixin):
         features = X.loc[:, list(MODEL_INPUT_FIELDS)].apply(pd.to_numeric, errors="coerce").astype("float64")
         for name, values in compute_derived_features(features).items():
             features[name] = values
-        return features.loc[:, list(FEATURE_COLUMNS)]
+        selected: pd.DataFrame = features.loc[:, list(FEATURE_COLUMNS)]
+        return selected
 
     def get_feature_names_out(self, input_features: Any = None) -> np.ndarray:
         return np.asarray(FEATURE_COLUMNS, dtype=object)

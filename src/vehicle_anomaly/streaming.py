@@ -25,13 +25,15 @@ import os
 import shutil
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
+from vehicle_anomaly.artifacts import ModelArtifactsError
 from vehicle_anomaly.config import AppConfig, load_config
 from vehicle_anomaly.local_stream import run_local_stream
 from vehicle_anomaly.logging_utils import configure_logging, get_logger
-from vehicle_anomaly.predict import AnomalyPredictor
+from vehicle_anomaly.predict import AnomalyPredictor, WindowAnomalyPredictor
 from vehicle_anomaly.schema import ID_FIELDS, NUMERIC_FIELDS, REQUIRED_FIELDS, TIMESTAMP_FIELD, VALID_RANGES
 from vehicle_anomaly.stream_common import BatchMetrics, BatchProcessor, summarize_run
 
@@ -54,15 +56,15 @@ def java_status() -> tuple[bool, str]:
 def hadoop_windows_status() -> tuple[bool, str]:
     """Spark's file source and checkpoints use Hadoop's local filesystem, which on Windows needs
     winutils.exe and hadoop.dll (not shipped by Apache). Other platforms need nothing extra."""
-    if sys.platform != "win32":
-        return True, "not required on this platform"
-    hadoop_home = os.environ.get("HADOOP_HOME")
-    if hadoop_home and (Path(hadoop_home) / "bin" / "winutils.exe").is_file():
-        return True, f"HADOOP_HOME={hadoop_home}"
-    return False, (
-        "Spark file streaming on Windows requires HADOOP_HOME with bin\\winutils.exe and bin\\hadoop.dll; "
-        "use the local engine, Docker, WSL or Linux instead"
-    )
+    if sys.platform == "win32":
+        hadoop_home = os.environ.get("HADOOP_HOME")
+        if hadoop_home and (Path(hadoop_home) / "bin" / "winutils.exe").is_file():
+            return True, f"HADOOP_HOME={hadoop_home}"
+        return False, (
+            "Spark file streaming on Windows requires HADOOP_HOME with bin\\winutils.exe and bin\\hadoop.dll; "
+            "use the local engine, Docker, WSL or Linux instead"
+        )
+    return True, "not required on this platform"
 
 
 def spark_status(file_io: bool = True) -> tuple[bool, str]:
@@ -211,17 +213,18 @@ def run_spark_stream(config: AppConfig, processor: BatchProcessor, checkpoint_di
         if progress:
             logger.info(
                 "Spark query progress",
-                extra={"batch_id": progress.get("batchId"), "num_input_rows": progress.get("numInputRows"),
-                       "processed_rows_per_second": progress.get("processedRowsPerSecond")},
+                extra={
+                    "batch_id": progress.get("batchId"),
+                    "num_input_rows": progress.get("numInputRows"),
+                    "processed_rows_per_second": progress.get("processedRowsPerSecond"),
+                },
             )
         return processed_batches
     finally:
         spark.stop()
 
 
-def run_streaming(
-    config: AppConfig, engine: str | None = None, reset: bool = False
-) -> dict[str, Any]:
+def run_streaming(config: AppConfig, engine: str | None = None, reset: bool = False) -> dict[str, Any]:
     paths = config.paths
     requested = engine or config.streaming.engine
     if reset:
@@ -230,7 +233,16 @@ def run_streaming(
                 shutil.rmtree(directory)
         logger.info("Streaming output and checkpoints reset")
 
-    predictor = AnomalyPredictor.load(paths.model_dir)
+    predictor: AnomalyPredictor | WindowAnomalyPredictor
+    feature_set = config.streaming.feature_set
+    if feature_set == "window":
+        try:
+            predictor = WindowAnomalyPredictor.load(paths.model_dir)
+        except ModelArtifactsError as exc:
+            logger.warning("No window model available; using the point model", extra={"reason": str(exc)})
+            predictor, feature_set = AnomalyPredictor.load(paths.model_dir), "point"
+    else:
+        predictor = AnomalyPredictor.load(paths.model_dir)
     processor = BatchProcessor(predictor, paths.streaming_output, config.streaming.output_format)
 
     spark_ok, spark_info = spark_status()
@@ -273,13 +285,22 @@ def run_streaming(
         paths.streaming_output,
         paths.reports_dir,
         paths.streaming_ground_truth,
-        run_info={"engine": selected, "requested_engine": requested, "wall_clock_seconds": round(wall_clock, 2),
-                  "batches_this_run": batches_this_run, "model": predictor.model_name, "note": note},
+        run_info={
+            "engine": selected,
+            "requested_engine": requested,
+            "wall_clock_seconds": round(wall_clock, 2),
+            "batches_this_run": batches_this_run,
+            "model": predictor.model_name,
+            "feature_set": feature_set,
+            "note": note,
+        },
     )
     logger.info(
         "Streaming run complete",
-        extra={k: summary[k] for k in ("batches", "input_rows", "valid_rows", "invalid_rows",
-                                       "duplicates_dropped", "anomalies_detected")},
+        extra={
+            k: summary[k]
+            for k in ("batches", "input_rows", "valid_rows", "invalid_rows", "duplicates_dropped", "anomalies_detected")
+        },
     )
     return summary
 

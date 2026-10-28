@@ -24,13 +24,18 @@ REQUIRED_FIELDS: tuple[str, ...] = (*ID_FIELDS, TIMESTAMP_FIELD, *NUMERIC_FIELDS
 LABEL_COLUMN = "is_anomaly"
 ANOMALY_TYPE_COLUMN = "anomaly_type"
 NORMAL_TYPE = "normal"
-ANOMALY_TYPES: tuple[str, ...] = (
+# Single-event faults: visible in one reading.
+POINT_ANOMALY_TYPES: tuple[str, ...] = (
     "overheating",
     "rpm_anomaly",
     "harsh_acceleration",
     "battery_voltage",
     "sensor_combination",
 )
+# Gradual faults: a slow drift relative to the vehicle's own baseline. Individual readings can stay
+# inside the normal range of the fleet, so they need per-vehicle history (window features).
+DRIFT_ANOMALY_TYPES: tuple[str, ...] = ("gradual_overheating", "battery_degradation")
+ANOMALY_TYPES: tuple[str, ...] = (*POINT_ANOMALY_TYPES, *DRIFT_ANOMALY_TYPES)
 
 # Physically plausible sensor ranges. Values outside are rejected as invalid input (sensor faults
 # or corrupt payloads). They are intentionally much wider than the anomaly ranges so genuine
@@ -60,3 +65,8 @@ MODEL_INPUT_FIELDS: tuple[str, ...] = (
 )
 DERIVED_FEATURES: tuple[str, ...] = ("rpm_per_speed", "abs_acceleration", "brake_accel_product")
 FEATURE_COLUMNS: tuple[str, ...] = (*MODEL_INPUT_FIELDS, *DERIVED_FEATURES)
+
+# Per-vehicle history features (see window_features.py). Computed causally from earlier events only.
+WINDOW_FEATURES: tuple[str, ...] = ("temp_dev", "temp_trend", "battery_dev", "battery_trend", "history_events")
+WINDOW_FEATURE_COLUMNS: tuple[str, ...] = (*FEATURE_COLUMNS, *WINDOW_FEATURES)
+FEATURE_SETS: dict[str, tuple[str, ...]] = {"point": FEATURE_COLUMNS, "window": WINDOW_FEATURE_COLUMNS}

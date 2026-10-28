@@ -1,11 +1,12 @@
 {
-  "generated_at": "2026-10-27T11:45:58+00:00",
+  "generated_at": "2026-10-27T14:18:24+00:00",
   "run": {
     "engine": "local",
     "requested_engine": "auto",
-    "wall_clock_seconds": 1.55,
+    "wall_clock_seconds": 2.05,
     "batches_this_run": 10,
-    "model": "random_forest",
+    "model": "random_forest_window",
+    "feature_set": "window",
     "note": ""
   },
   "batches": 10,
@@ -17,7 +18,7 @@
   "invalid_rows": 1000,
   "duplicates_dropped": 500,
   "scored_rows": 99000,
-  "anomalies_detected": 5006,
+  "anomalies_detected": 8467,
   "invalid_by_category": {
     "missing_field": 335,
     "malformed_json": 183,
@@ -59,14 +60,48 @@
     "missing_field:vehicle_id": 10,
     "missing_field:event_id": 10
   },
-  "batch_processing_seconds_total": 1.466,
-  "rows_per_second_in_batch_processing": 68572.6,
+  "batch_processing_seconds_total": 1.953,
+  "rows_per_second_in_batch_processing": 51461.9,
   "ground_truth_comparison": {
     "matched_events": 99000,
-    "precision": 0.974230922892529,
-    "recall": 0.9703541583764425,
-    "true_positives": 4877,
-    "false_positives": 129,
-    "false_negatives": 149
+    "precision": 0.9180347230423999,
+    "recall": 0.9544449901768173,
+    "true_positives": 7773,
+    "false_positives": 694,
+    "false_negatives": 371,
+    "by_type": {
+      "battery_degradation": {
+        "events": 1578,
+        "flagged_share": 0.9936628643852978
+      },
+      "battery_voltage": {
+        "events": 1015,
+        "flagged_share": 0.994088669950739
+      },
+      "gradual_overheating": {
+        "events": 1533,
+        "flagged_share": 0.786692759295499
+      },
+      "harsh_acceleration": {
+        "events": 1012,
+        "flagged_share": 0.9980237154150198
+      },
+      "normal": {
+        "events": 90856,
+        "flagged_share": 0.0076384608611429075
+      },
+      "overheating": {
+        "events": 987,
+        "flagged_share": 0.9746707193515705
+      },
+      "rpm_anomaly": {
+        "events": 1003,
+        "flagged_share": 0.9990029910269193
+      },
+      "sensor_combination": {
+        "events": 1016,
+        "flagged_share": 1.0
+      }
+    }
   }
 }
