@@ -99,7 +99,7 @@ flowchart LR
 | Point vs window models (RandomForest, XGBoost) + IsolationForest baseline | Implemented | Vehicle-grouped splits, validation-tuned thresholds and selection, recall per fault type |
 | Evaluation: precision, recall, F1, ROC-AUC, PR-AUC, confusion matrix | Implemented | Plus recall per anomaly type and Matplotlib figures |
 | Optimized inference path and benchmark | Implemented | Native path bit-identical to the reference path; measured numbers below |
-| ONNX export + ONNX Runtime serving (edge runtime) | Implemented and verified | Exported at training time with a parity check; benchmarked for latency, throughput, size and load time; used on Render |
+| ONNX export + ONNX Runtime serving (edge runtime) | Implemented and verified | Exported at training time with a parity check; benchmarked for latency, throughput, size and load time; `render.yaml` selects it for Render (see the note under [API and live demo](#api-and-live-demo)) |
 | Streaming: pandas micro-batch engine (default on Windows) | Implemented and verified | File checkpoint, per-vehicle window state per batch, idempotent sinks; crash-replay reproduces scores (tested) |
 | Streaming: PySpark Structured Streaming engine | Implemented and verified on Linux (CI) | The full file-source + checkpoint path runs in GitHub Actions (Ubuntu, Java 17, PySpark 4.1) and matches the pandas engine. On the Windows development machine only the validation and `foreachBatch` logic could run (see [Spark on Windows](#spark-on-windows)) |
 | FastAPI service (`/health`, `/model-info`, `/predict`, `/predict-batch`, `/predict-stream`, `/docs`) | Implemented and verified | Models loaded once at startup; stateless server with client-held stream state; `/health` returns 503 without a model |
@@ -382,7 +382,9 @@ any request, and nothing is stored server-side. Splitting a stream into batches 
 scores as sending it in one call (tested). State is limited to 1,000 vehicles per stream.
 
 **Runtime:** `VTAD_RUNTIME=onnx` (or `api.runtime: onnx`) serves both models through ONNX Runtime instead of
-scikit-learn/XGBoost. The Render deployment uses it.
+scikit-learn/XGBoost. `render.yaml` sets it for the Render service, and the CI Docker job runs the image with it.
+Note: on 2026-10-29 the live service's `/health` and `/model-info` reported `"runtime": "native"`, so the
+running instance's environment does not currently match the Blueprint; check `/health` for the active runtime.
 
 ```powershell
 $event = @{
@@ -584,8 +586,8 @@ limit. Relative paths resolve against the project root. Environment overrides:
 | `VTAD_CONFIG` | Path to an alternative config file |
 | `VTAD_MODEL_DIR` | Model artifact directory |
 | `LOG_LEVEL` | Logging level (`INFO`, `WARNING`, ...) |
-| `VTAD_RUNTIME` | `native` (scikit-learn / XGBoost) or `onnx` (ONNX Runtime) for the API (`api.runtime`; Render uses `onnx`) |
-| `VTAD_INFERENCE_THREADS` | Cap model inference threads (`api.inference_threads`; Render uses 1) |
+| `VTAD_RUNTIME` | `native` (scikit-learn / XGBoost) or `onnx` (ONNX Runtime) for the API (`api.runtime`; `render.yaml` sets `onnx`) |
+| `VTAD_INFERENCE_THREADS` | Cap model inference threads (`api.inference_threads`; `render.yaml` sets 1) |
 | `PORT` / `HOST` | API bind port and address (default `8000` / `0.0.0.0`) |
 | `JAVA_HOME`, `HADOOP_HOME` | Spark engine prerequisites |
 
