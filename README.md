@@ -18,8 +18,24 @@ first request after a period of inactivity can take up to a minute while the ins
 > [`data_generator.py`](src/vehicle_anomaly/data_generator.py). No real vehicle, fleet or production telemetry
 > is used, and none of the metrics below describe real-world performance.
 
+**Status:** complete as a portfolio project (CI green: lint, strict type check, 109 tests, Docker smoke test).
+Synthetic data only; the Kafka source is not implemented (the streaming input is JSON Lines files).
+
+### What "real-time" and "edge" mean in this project
+
+- **Real-time** means *micro-batch* stream processing plus low per-event scoring latency, not a hard real-time
+  system. The streaming pipeline reads JSON Lines files in micro-batches (Spark Structured Streaming or a pandas
+  engine), by default processing the backlog and stopping (`available_now`); a polling `processing_time`
+  trigger is also available. The API scores single events or small batches on request. There is no message
+  broker, no event-time watermarking and no latency SLO.
+- **Edge ML optimization** means making single-event CPU inference cheap: a NumPy feature path instead of
+  pandas, and ONNX Runtime with **one** thread as an edge-like setting, plus smaller artifacts. All latency
+  numbers were measured on one x86 developer laptop (and a shared Render CPU); the models have **not** been run
+  or measured on an embedded/ARM device or in a vehicle.
+
 ## Contents
 
+- [What "real-time" and "edge" mean in this project](#what-real-time-and-edge-mean-in-this-project)
 - [Architecture](#architecture)
 - [Features and status](#features-and-status)
 - [Technology stack](#technology-stack)
@@ -83,7 +99,7 @@ flowchart LR
 | Point vs window models (RandomForest, XGBoost) + IsolationForest baseline | Implemented | Vehicle-grouped splits, validation-tuned thresholds and selection, recall per fault type |
 | Evaluation: precision, recall, F1, ROC-AUC, PR-AUC, confusion matrix | Implemented | Plus recall per anomaly type and Matplotlib figures |
 | Optimized inference path and benchmark | Implemented | Native path bit-identical to the reference path; measured numbers below |
-| ONNX export + ONNX Runtime serving (edge runtime) | Implemented and verified | Exported at training time with a parity check; benchmarked for latency, throughput, size and load time; used on Render |
+| ONNX export + ONNX Runtime serving (edge runtime) | Implemented and verified | Exported at training time with a parity check; benchmarked for latency, throughput, size and load time; `render.yaml` selects it for Render (see the note under [API and live demo](#api-and-live-demo)) |
 | Streaming: pandas micro-batch engine (default on Windows) | Implemented and verified | File checkpoint, per-vehicle window state per batch, idempotent sinks; crash-replay reproduces scores (tested) |
 | Streaming: PySpark Structured Streaming engine | Implemented and verified on Linux (CI) | The full file-source + checkpoint path runs in GitHub Actions (Ubuntu, Java 17, PySpark 4.1) and matches the pandas engine. On the Windows development machine only the validation and `foreachBatch` logic could run (see [Spark on Windows](#spark-on-windows)) |
 | FastAPI service (`/health`, `/model-info`, `/predict`, `/predict-batch`, `/predict-stream`, `/docs`) | Implemented and verified | Models loaded once at startup; stateless server with client-held stream state; `/health` returns 503 without a model |
@@ -103,7 +119,7 @@ PyArrow · pytest · ruff · mypy · Docker · GitHub Actions · Render.
 ## Repository structure
 
 ```
-vehicle-telemetry-anomaly-detection/
+Real-Time-Vehicle-Telemetry-Anomaly-Detection-Edge-ML-Optimization/
 ├── src/vehicle_anomaly/
 │   ├── config.py           # typed YAML config + env overrides
 │   ├── schema.py           # data contract: fields, units, valid ranges, model features
@@ -143,7 +159,8 @@ vehicle-telemetry-anomaly-detection/
 ### Windows (PowerShell)
 
 ```powershell
-cd vehicle-telemetry-anomaly-detection
+git clone https://github.com/Charanloyal/Real-Time-Vehicle-Telemetry-Anomaly-Detection-Edge-ML-Optimization.git
+cd Real-Time-Vehicle-Telemetry-Anomaly-Detection-Edge-ML-Optimization
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1          # if blocked: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 python -m pip install --upgrade pip
@@ -157,6 +174,8 @@ pip install -r requirements-spark.txt
 ### Linux / macOS
 
 ```bash
+git clone https://github.com/Charanloyal/Real-Time-Vehicle-Telemetry-Anomaly-Detection-Edge-ML-Optimization.git
+cd Real-Time-Vehicle-Telemetry-Anomaly-Detection-Edge-ML-Optimization
 python3 -m venv .venv && source .venv/bin/activate
 pip install --upgrade pip
 pip install -r requirements-dev.txt && pip install --no-deps -e .
@@ -332,9 +351,11 @@ The **demo page** (`/`) has three parts:
   and `POST /predict-stream` (window model; the browser sends back the returned state). Predictions are
   compared with the generator's ground truth, which is never sent to the models. The page shows precision,
   recall, recall on gradual faults and false alarms per model, a two-line score chart and the latest events.
-  It stops when the tab is hidden or the 4,000-event stream ends. Window-model false alarms in the demo are
-  mostly early warnings: across 5 full demo streams, 70% came within 150 events before a labelled drift, and 26%
-  fell in a vehicle's first 200 events, while its baseline is still forming.
+  It stops when the tab is hidden or the 4,000-event stream ends. Many window-model false alarms in the demo
+  are early warnings: a drift is labelled only after it has moved 4 °C / 0.5 V, so alarms while it is building
+  count as false. A one-off offline check of 5 full demo streams put 70% of false alarms within 150 events before
+  a labelled drift and 26% in a vehicle's first 200 events (baseline still forming); the script for that check
+  is not committed, so treat these two numbers as indicative.
 - **Reports:** the benchmark table, labelled with the developer machine it was measured on; the streaming run
   executed during the image build; and the evaluation figures.
 
@@ -361,7 +382,9 @@ any request, and nothing is stored server-side. Splitting a stream into batches 
 scores as sending it in one call (tested). State is limited to 1,000 vehicles per stream.
 
 **Runtime:** `VTAD_RUNTIME=onnx` (or `api.runtime: onnx`) serves both models through ONNX Runtime instead of
-scikit-learn/XGBoost. The Render deployment uses it.
+scikit-learn/XGBoost. `render.yaml` sets it for the Render service, and the CI Docker job runs the image with it.
+Note: on 2026-10-29 the live service's `/health` and `/model-info` reported `"runtime": "native"`, so the
+running instance's environment does not currently match the Blueprint; check `/health` for the active runtime.
 
 ```powershell
 $event = @{
@@ -489,8 +512,10 @@ mypy                        # strict mode, configured in pyproject.toml
 
 **Latest run on the development machine** (Windows, Python 3.14.7, `JAVA_HOME` set to a JDK 17):
 **108 passed, 1 skipped**. The skipped test is the Spark file-source test, for the Windows `winutils`
-reason explained above. Without Java, the in-memory Spark test is skipped as well. `ruff check`,
-`ruff format --check` and `mypy --strict` (20 source files) report no issues.
+reason explained above. Without Java, the in-memory Spark test is skipped as well (a re-run on Windows without
+Java gave 107 passed, 2 skipped). `ruff check`, `ruff format --check` and `mypy --strict` (20 source files)
+report no issues. The GitHub Actions run for commit `e7552f7` reported **109 passed, 0 skipped** (Python 3.11,
+Java 17, PySpark).
 
 **GitHub Actions** ([ci.yml](.github/workflows/ci.yml)) runs on every push and pull request:
 1. **Lint and type check:** `ruff check`, `ruff format --check` and `mypy` (strict).
@@ -544,9 +569,10 @@ Render's published JSON schema.
 
 **Free-plan behaviour:** the service sleeps after about 15 minutes without traffic. The first request after
 that takes up to a minute while it wakes up, and the demo page shows a "waking up" message during that time.
-Latency on the shared free CPU is higher than the laptop benchmark numbers. In the smoke test against the live
-service, server-side time was about 10 ms for one event and 12 ms for a 40-event batch, with predictions
-matching the generator's ground truth for 40/40 events.
+Latency on the shared free CPU is higher than the laptop benchmark numbers. In one manual run of
+`scripts/deploy_smoke_test.py` against the live service (output not committed), server-side time was about
+10 ms for one event and 12 ms for a 40-event batch, with predictions matching the generator's ground truth for
+40/40 events.
 
 ## Configuration
 
@@ -560,8 +586,8 @@ limit. Relative paths resolve against the project root. Environment overrides:
 | `VTAD_CONFIG` | Path to an alternative config file |
 | `VTAD_MODEL_DIR` | Model artifact directory |
 | `LOG_LEVEL` | Logging level (`INFO`, `WARNING`, ...) |
-| `VTAD_RUNTIME` | `native` (scikit-learn / XGBoost) or `onnx` (ONNX Runtime) for the API (`api.runtime`; Render uses `onnx`) |
-| `VTAD_INFERENCE_THREADS` | Cap model inference threads (`api.inference_threads`; Render uses 1) |
+| `VTAD_RUNTIME` | `native` (scikit-learn / XGBoost) or `onnx` (ONNX Runtime) for the API (`api.runtime`; `render.yaml` sets `onnx`) |
+| `VTAD_INFERENCE_THREADS` | Cap model inference threads (`api.inference_threads`; `render.yaml` sets 1) |
 | `PORT` / `HOST` | API bind port and address (default `8000` / `0.0.0.0`) |
 | `JAVA_HOME`, `HADOOP_HOME` | Spark engine prerequisites |
 
@@ -583,7 +609,9 @@ See [.env.example](.env.example). No secrets are required.
   decisions differed for the point RandomForest; the other exports agreed on every decision.
 - The Spark file-source path cannot run on the Windows development machine without `winutils`; it is verified
   by the Linux CI job. `Dockerfile.spark` is not built in CI.
-- Benchmarks come from one laptop and include normal OS noise. The free Render instance is slower.
+- Benchmarks come from one laptop and include normal OS noise. The free Render instance is slower. No
+  benchmark was run on embedded or ARM hardware.
+- The streaming source is files only; Kafka is not implemented.
 - The public demo has no authentication or rate limiting beyond request validation and batch-size limits.
 
 **Future work**
